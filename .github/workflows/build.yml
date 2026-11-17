@@ -32,8 +32,6 @@ jobs:
             -storepass etasign -keypass etasign -dname "CN=clock"
 
       - name: 构建
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
         run: |
           chmod +x build.sh
           ./build.sh

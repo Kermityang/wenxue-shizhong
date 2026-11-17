@@ -16,7 +16,7 @@ set -e
 APP=$(cd "$(dirname "$0")" && pwd)
 OUT="$APP/build"
 
-ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
+ANDROID_HOME=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}
 
 # build-tools：默认 34.0.0，没有就用现有的最高版本
 BUILD_TOOLS=${BUILD_TOOLS:-$ANDROID_HOME/build-tools/34.0.0}
