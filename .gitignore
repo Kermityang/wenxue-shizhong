@@ -1,0 +1,18 @@
+# 忽略构建产物与本地私有文件
+build/
+clock.apk
+*.apk
+release.jks
+.github_token
+
+# 自备语料（把小说引语译文放这里，不要提交）
+assets/local-corpus.json
+local-corpus.json
+
+# 字体（4MB，自行下载，见 README）
+assets/*.ttf
+
+# 系统垃圾
+.DS_Store
+*.log
+__pycache__/
