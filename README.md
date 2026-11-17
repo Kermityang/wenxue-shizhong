@@ -26,7 +26,11 @@
 
 从 [Releases](../../releases) 下载 `clock-x.y.apk` 直接安装（Android 8.0+）。
 
+**Release 里的包是「完整包」**：内嵌 4MB 的霞鹜文楷子集（含 OFL 许可文本），装上就是截图里的样子，不需要额外配置。
+
 桌面图标是一个细线钟面。点开即全屏显示；**点一下**退出，**上滑**进设置。
+
+> Actions 里自动构建出的 artifact（约 50KB）**不带字体**，用途只是验证代码能否编译；正式分发请用 Release 的完整包。
 
 ## 构建
 
@@ -50,9 +54,42 @@ keytool -genkeypair -keystore release.jks -alias clock -keyalg RSA -keysize 2048
 
 （`release.jks` 已在 `.gitignore` 里，不会误提交。注意：**换签名后无法覆盖升级**，请自己保管好这个文件。）
 
-### 字体（可选）
+### 字体与子集
 
-界面默认使用 **霞鹜文楷 Light**（LXGW WenKai，SIL OFL 1.1）。把字体文件放成 `assets/LXGWWenKai-Light.ttf` 即可启用；没有这个文件时 App 自动退回系统衬线体，功能不受影响。
+界面默认使用 **霞鹜文楷 Light**（LXGW WenKai，SIL OFL 1.1，© LXGW）。上游完整字体约 28MB，直接放进 APK 太重，所以本项目用的是**按字符子集化**后的 4MB 版本。
+
+没有字体文件时 App 自动退回系统衬线体，功能不受影响。
+
+自己生成一个子集：
+
+```sh
+pip install fonttools
+curl -LO https://raw.githubusercontent.com/lxgw/LxgwWenKai/main/fonts/TTF/LXGWWenKai-Light.ttf
+pyftsubset LXGWWenKai-Light.ttf --text-file=docs/chars.txt \
+    --output-file=assets/LXGWWenKai-Light.ttf
+cp docs/OFL-LXGWWenKai.txt assets/       # 字体许可随包分发
+```
+
+`docs/chars.txt` 是当前语料 + 界面文案用到的 3060 个字符。**换了自己的语料后记得重新生成它**，否则新语料里没用过的字会显示成方框。
+
+### 签名与校验
+
+Release 里的 APK 用一个固定的自签名证书签名：
+
+```
+Owner: CN=Eta Clock, O=Eta
+SHA-256: 56:4A:DE:0B:54:C5:E6:B3:1A:4D:ED:39:79:72:88:1D:5D:96:C8:5E:49:33:05:2C:77:14:C3:C1:C1:77:0D:E1
+有效期: 2026-11-17 → 2054-04-04
+```
+
+自己校验：
+
+```sh
+keytool -printcert -jarfile clock-1.37.apk | grep SHA256
+jarsigner -verify clock-1.37.apk        # 应输出 "jar verified."
+```
+
+自签名证书意味着「签名者自称」，不意味着任何机构背书；它的作用是**保证升级包一致**——换了证书签的包无法覆盖安装。
 
 ## 语料：为什么仓库里只有一部分
 

@@ -36,8 +36,12 @@
 
 ## 四、字体
 
-界面使用 **霞鹜文楷（LXGW WenKai）**，作者 LXGW，以 **SIL Open Font License 1.1** 发布。字体文件不在仓库内，需自行获取：
+界面使用 **霞鹜文楷（LXGW WenKai）**，作者 LXGW，以 **SIL Open Font License 1.1** 发布：
 <https://github.com/lxgw/LxgwWenKai>
+
+- 仓库内不放字体二进制，只放许可文本 `docs/OFL-LXGWWenKai.txt` 与子集字符表 `docs/chars.txt`；
+- 发布的 APK 内嵌**子集化**后的字体（约 4MB），并同时把 `assets/OFL-LXGWWenKai.txt` 打进包里，满足 OFL 对「随字体分发许可」的要求；
+- 未使用保留字体名（霞鹜 / LXGW 等）另行命名，字体名保持原样。
 
 ## 五、代码
 
