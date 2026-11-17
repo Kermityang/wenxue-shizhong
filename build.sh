@@ -17,12 +17,25 @@ APP=$(cd "$(dirname "$0")" && pwd)
 OUT="$APP/build"
 
 ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
-ANDROID_JAR=${ANDROID_JAR:-$ANDROID_HOME/platforms/android-34/android.jar}
+
+# build-tools：默认 34.0.0，没有就用现有的最高版本
 BUILD_TOOLS=${BUILD_TOOLS:-$ANDROID_HOME/build-tools/34.0.0}
+[ -d "$BUILD_TOOLS" ] || BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)
+
+# android.jar：默认 android-34，没有就用现有的最高版本
+ANDROID_JAR=${ANDROID_JAR:-$ANDROID_HOME/platforms/android-34/android.jar}
+[ -f "$ANDROID_JAR" ] || ANDROID_JAR=$(ls "$ANDROID_HOME"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)
+
+# r8：仓库内 → build-tools/lib → SDK/lib
 R8=${R8:-$APP/tools/r8.jar}
+[ -f "$R8" ] || R8="$BUILD_TOOLS/lib/r8.jar"
 [ -f "$R8" ] || R8="$ANDROID_HOME/lib/r8.jar"
 KEYSTORE=${KEYSTORE:-$APP/release.jks}
 
+echo "ANDROID_HOME=$ANDROID_HOME"
+echo "BUILD_TOOLS=$BUILD_TOOLS"
+echo "ANDROID_JAR=$ANDROID_JAR"
+echo "R8=$R8"
 for f in "$ANDROID_JAR" "$BUILD_TOOLS/aapt2" "$BUILD_TOOLS/zipalign" "$R8"; do
   [ -e "$f" ] || { echo "缺少依赖: $f" >&2; exit 1; }
 done
