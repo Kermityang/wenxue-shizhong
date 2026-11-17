@@ -41,7 +41,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ./build.sh          # 产物：clock.apk
 ```
 
-脚本用到的环境变量：`ANDROID_JAR`、`BUILD_TOOLS`、`R8`、`KEYSTORE`、`STORE_PASS`、`KEY_PASS`、`KEY_ALIAS`，默认值见 `build.sh` 开头。CI 配置在 `.github/workflows/build.yml`：每次 push 自动构建 APK，打 `v*` 标签时自动发 Release。
+脚本用到的环境变量：`ANDROID_JAR`、`BUILD_TOOLS`、`R8`、`KEYSTORE`、`STORE_PASS`、`KEY_PASS`、`KEY_ALIAS`，默认值见 `build.sh` 开头。CI 配置在 `.github/workflows/build.yml`：每次 push 自动构建 APK，**只作构建体检**（artifact 用临时证书签名、不含字体，不是发布包）。CI 不发布任何东西——Release 里的包由维护者用固定证书在本机构建后上传。
 
 ### 签名
 
@@ -74,7 +74,7 @@ cp docs/OFL-LXGWWenKai.txt assets/       # 字体许可随包分发
 
 ### 签名与校验
 
-Release 里的 APK 用一个固定的自签名证书签名：
+Release 里的 APK 用一个**固定的**自签名证书签名（由维护者本机构建后上传；CI 现场生成的临时证书**不用于发布**）：
 
 ```
 Owner: CN=Eta Clock, O=Eta
