@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ 的启动画面：底色纯黑、图标用全透明占位，启动那一瞬等于没有画面 -->
+    <style name="ClockTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/clock_black</item>
+        <item name="android:colorBackground">@color/clock_black</item>
+        <item name="android:windowSplashScreenBackground">@color/clock_black</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="android:windowSplashScreenAnimationDuration">0</item>
+    </style>
+</resources>
