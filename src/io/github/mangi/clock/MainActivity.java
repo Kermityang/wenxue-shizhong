@@ -129,6 +129,7 @@ public class MainActivity extends Activity {
     private float quoteScale = 1f;
     private boolean adjusting = false;
     private boolean bookMode = false;
+    private boolean indentMode = false;
     private int quoteTopPad;
     private int quoteBottomPad;
     private FrameLayout quoteContainer;
@@ -504,15 +505,20 @@ public class MainActivity extends Activity {
         quoteScale = 1f;
         // 块太高就逐档缩字号，保证整块落在「时钟上方」那块地里
         float room = quoteRoomHeight();
-        Laid laid = layoutQuote(quoteText, quoteSize, bookMode);
+        indentMode = bookMode;
+        Laid laid = layoutQuote(quoteText, quoteSize, bookMode, indentMode);
+        if (bookMode && laid.lines < 3) {
+            // 只有一两行的摘录（现代诗、短对白）不做首行缩进
+            indentMode = false;
+            laid = layoutQuote(quoteText, quoteSize, bookMode, indentMode);
+        }
         while (estimateHeight(laid.lines, quoteSize, mult) > room && quoteSize > baseQuoteSize * 0.72f) {
             quoteSize *= 0.92f;
             quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
-            laid = layoutQuote(quoteText, quoteSize, bookMode);
+            laid = layoutQuote(quoteText, quoteSize, bookMode, indentMode);
         }
         applyLaid(laid);
-        bookView.setTextSize(TypedValue.COMPLEX_UNIT_PX, sourceBase);
-        bookView.setText(formatSource(book));
+        layOutSource(formatSource(book));
 
         timeView.setText(new SimpleDateFormat("HH:mm", Locale.getDefault())
                 .format(calendar.getTime()));
@@ -562,6 +568,50 @@ public class MainActivity extends Activity {
     /** 不许留在行尾的起首标点 */
     private static final String OPEN_PUNCT = "（【《「『“‘([{";
 
+    /** 出处排版：太长就缩字号，缩到 0.7 倍仍放不下就在书名号/括号处折成两行，避免被屏幕切掉 */
+    private void layOutSource(String raw) {
+        String text = raw == null ? "" : raw;
+        float size = sourceBase;
+        float avail = quoteWidth();
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Typeface typeface = bookView != null ? bookView.getTypeface() : Typeface.SERIF;
+        if (typeface != null) {
+            paint.setTypeface(typeface);
+        }
+        paint.setTextSize(size);
+        float width = paint.measureText(text);
+        if (width > avail && width > 0f) {
+            float fit = avail / width;
+            if (fit >= 0.7f) {
+                size *= fit;
+            } else {
+                size *= 0.7f;
+                text = breakSource(text);
+            }
+        }
+        bookView.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
+        bookView.setText(text);
+    }
+
+    /** 在中间附近找一个体面的断点（书名号、括号、间隔号之后），找不到就硬折 */
+    private static String breakSource(String text) {
+        int middle = text.length() / 2;
+        int best = -1;
+        for (int i = 0; i < text.length() - 1; i++) {
+            char c = text.charAt(i);
+            if (c == '、' || c == '，' || c == '·' || c == '（' || c == '《' || c == '）'
+                    || c == '》' || c == ' ') {
+                if (best < 0 || Math.abs(i - middle) < Math.abs(best - middle)) {
+                    best = i + 1;
+                }
+            }
+        }
+        if (best <= 0 || best >= text.length()) {
+            best = middle;
+        }
+        return text.substring(0, best) + "\n" + text.substring(best);
+    }
+
     /** 小说、散文按书本排（≥两句，或超过 40 字）；短诗仍按句读居中 */
     private static boolean isBookText(String text) {
         if (text == null) {
@@ -588,7 +638,7 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        return sentences >= 2;
+        return sentences >= 2 && text.length() > 24;
     }
 
     private float bookMargin() {
@@ -652,7 +702,7 @@ public class MainActivity extends Activity {
      * 按「句读」断行：优先在逗号、句号处换行，让每行都以标点收尾，凑不成整句时再退一步做均衡分配，
      * 保证末行不会只剩一两个字（诗的二、三句话各自成行）。
      */
-    private Laid layoutQuote(String source, float size, boolean book) {
+    private Laid layoutQuote(String source, float size, boolean book, boolean indent) {
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         Typeface typeface = quoteView.getTypeface();
         if (typeface != null) {
@@ -667,7 +717,8 @@ public class MainActivity extends Activity {
         for (int i = 0; i <= source.length(); i++) {
             if (i == source.length() || source.charAt(i) == '\n') {
                 if (i > from) {
-                    appendParagraph(display, map, source.substring(from, i), from, paint, size, avail, book);
+                    appendParagraph(display, map, source.substring(from, i), from, paint, size, avail,
+                            book, indent);
                 }
                 from = i + 1;
             }
@@ -700,7 +751,7 @@ public class MainActivity extends Activity {
     private static final double WIDOW_PENALTY = 60.0;
 
     private void appendParagraph(StringBuilder display, List<Integer> map, String paragraph, int offset,
-                                 Paint paint, float size, float avail, boolean book) {
+                                 Paint paint, float size, float avail, boolean book, boolean indent) {
         List<String> clusters = new ArrayList<>();
         List<Integer> starts = new ArrayList<>();
         clusterize(paragraph, offset, clusters, starts);
@@ -719,11 +770,12 @@ public class MainActivity extends Activity {
         double limit = avail / size;
         if (book) {
             // 书本式：首行缩进两字、每行铺满到右边距、行尾自然收，读起来像一整段文字
-            boolean indent = display.length() == 0;
-            int[] lines = packBook(widths, limit, indent ? limit - 2 : limit);
+            boolean indentFirst = indent && display.length() == 0;
+            int[] lines = packBook(widths, limit, indentFirst ? limit - 2 : limit);
             if (lines.length > 1) {
                 for (double factor = 0.99; factor >= 0.86; factor -= 0.01) {
-                    int[] candidate = packBook(widths, limit * factor, indent ? limit * factor - 2 : limit * factor);
+                    int[] candidate = packBook(widths, limit * factor,
+                            indentFirst ? limit * factor - 2 : limit * factor);
                     if (candidate.length != lines.length) {
                         continue;
                     }
@@ -954,7 +1006,7 @@ public class MainActivity extends Activity {
     }
 
     private void applyQuoteText(float size) {
-        applyLaid(layoutQuote(quoteText, size, bookMode));
+        applyLaid(layoutQuote(quoteText, size, bookMode, indentMode));
     }
 
     private void applyLaid(Laid laid) {
@@ -995,7 +1047,7 @@ public class MainActivity extends Activity {
             int firstBreak = laid.text.indexOf('\n');
             int firstEnd = firstBreak < 0 ? spannable.length() : firstBreak;
             // 首行缩进两字：用段落前导边距，不依赖字体里的全角空格字形
-            if (firstEnd > 0) {
+            if (firstEnd > 0 && indentMode) {
                 spannable.setSpan(new android.text.style.LeadingMarginSpan.Standard(
                                 (int) (size * 2f), 0), 0, firstEnd,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
