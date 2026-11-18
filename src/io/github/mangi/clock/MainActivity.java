@@ -1206,6 +1206,28 @@ public class MainActivity extends Activity {
                 from = to + 1;
             }
         }
+        // 居中的诗行若以收尾标点结尾，行尾会多挂半个字的空白，视觉重心偏左：
+        // 用前导边距把它往右挪半个字，肉眼才真正居中
+        if (!bookMode && spannable.length() > 0) {
+            float size = quoteView.getTextSize();
+            int from = 0;
+            String text = laid.text;
+            while (from < text.length()) {
+                int to = text.indexOf('\n', from);
+                if (to < 0) {
+                    to = text.length();
+                }
+                if (to > from) {
+                    char last = text.charAt(to - 1);
+                    if (CLOSE_PUNCT.indexOf(last) >= 0) {
+                        spannable.setSpan(new android.text.style.LeadingMarginSpan.Standard(
+                                        (int) (size * 0.9f), 0), from, to,
+                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                }
+                from = to + 1;
+            }
+        }
         if (spannable.length() > 0) {
             float size = quoteView.getTextSize();
             Paint metrics = new Paint(Paint.ANTI_ALIAS_FLAG);
