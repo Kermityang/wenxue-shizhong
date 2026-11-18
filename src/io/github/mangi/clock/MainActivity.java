@@ -779,9 +779,30 @@ public class MainActivity extends Activity {
     }
 
     /** 小说、散文按书本排（≥两句，或超过 40 字）；短诗仍按句读居中 */
+    /** 明显是小说/笔记的出处：这类一律按书页排，不管句子长短 */
+    private static final String[] NOVELS = {"水浒", "西游记", "三国演义", "红楼梦", "儒林外史", "金瓶梅",
+            "聊斋", "说岳", "镜花缘", "封神演义", "儿女英雄传", "老残游记", "官场现形记", "二十年目睹",
+            "三侠五义", "醒世恒言", "喻世明言", "警世通言", "初刻拍案惊奇", "二刻拍案惊奇", "拍案惊奇",
+            "东周列国", "隋唐演义", "说唐", "济公", "阅微草堂", "子不语", "夜雨秋灯"};
+
+    private static boolean isNovelSource(String source) {
+        if (source == null) {
+            return false;
+        }
+        for (String novel : NOVELS) {
+            if (source.contains(novel)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isBookText(String text, String source) {
         if (text == null) {
             return false;
+        }
+        if (isNovelSource(source)) {
+            return true;
         }
         if (text.length() > 40) {
             return true;
