@@ -1242,6 +1242,27 @@ public class MainActivity extends Activity {
         }
 
         quoteView.setText(spannable);
+        if (bookMode) {
+            quoteView.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (quoteView == null || quoteView.getLayout() == null) {
+                        return;
+                    }
+                    android.text.Layout layout = quoteView.getLayout();
+                    float widest = 0f;
+                    for (int i = 0; i < layout.getLineCount(); i++) {
+                        widest = Math.max(widest, layout.getLineWidth(i));
+                    }
+                    float dx = Math.max(0f, (quoteView.getWidth() - widest) / 2f);
+                    if (Math.abs(quoteView.getTranslationX() - dx) > 1f) {
+                        quoteView.setTranslationX(dx);
+                    }
+                }
+            });
+        } else if (quoteView != null) {
+            quoteView.setTranslationX(0f);
+        }
     }
 
     private void applyPalette() {
