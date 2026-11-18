@@ -785,6 +785,50 @@ public class MainActivity extends Activity {
             "三侠五义", "醒世恒言", "喻世明言", "警世通言", "初刻拍案惊奇", "二刻拍案惊奇", "拍案惊奇",
             "东周列国", "隋唐演义", "说唐", "济公", "阅微草堂", "子不语", "夜雨秋灯"};
 
+    /** 宋人笔记、史志、风土记：叙事体，按书页排 */
+    private static final String[] NOTES = {"梦粱录", "东京梦华录", "武林旧事", "东坡志林", "老学庵笔记",
+            "容斋随笔", "鸡肋编", "齐东野语", "鹤林玉露", "清波杂志", "春渚纪闻", "能改斋漫录",
+            "游宦纪闻", "癸辛杂识", "贵耳集", "铁围山丛谈", "世说新语", "阅微草堂", "子不语"};
+
+    private static boolean isNotesSource(String source) {
+        if (source == null) {
+            return false;
+        }
+        for (String note : NOTES) {
+            if (source.contains(note)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 一整联（五言/七言各半）就算诗，即便出自小说或笔记 */
+    private static boolean isCouplet(String text) {
+        if (text == null) {
+            return false;
+        }
+        String t = text.trim();
+        while (t.endsWith("。") || t.endsWith("！") || t.endsWith("？")) {
+            t = t.substring(0, t.length() - 1);
+        }
+        int comma = t.indexOf('，');
+        if (comma <= 0 || t.indexOf('，', comma + 1) >= 0) {
+            return false;
+        }
+        int a = comma;
+        int b = t.length() - comma - 1;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c == '，') {
+                continue;
+            }
+            if (c == '。' || c == '；' || c == '：' || c == '！' || c == '？' || c == '、' || c == '…') {
+                return false;
+            }
+        }
+        return a == b && (a == 5 || a == 7);
+    }
+
     private static boolean isNovelSource(String source) {
         if (source == null) {
             return false;
@@ -801,8 +845,8 @@ public class MainActivity extends Activity {
         if (text == null) {
             return false;
         }
-        if (isNovelSource(source)) {
-            return true;
+        if (isNovelSource(source) || isNotesSource(source)) {
+            return !isCouplet(text);
         }
         if (text.length() > 40) {
             return true;
