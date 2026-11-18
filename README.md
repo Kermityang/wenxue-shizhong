@@ -48,7 +48,7 @@
 
 从 [Releases](../../releases) 下载 `clock-x.y.apk` 直接安装（Android 8.0+）。
 
-**Release 里的包是「完整包」**：内嵌 4MB 的霞鹜文楷子集（含 OFL 许可文本），装上就是截图里的样子，不需要额外配置。
+**Release 里的包是「完整包」**：内嵌霞鹜文楷子集（约 1.8MB，含 OFL 许可文本），装上就是截图里的样子，不需要额外配置。
 
 桌面图标是一个细线钟面。点开即全屏显示；**点一下**退出，**上滑**进设置。
 
@@ -78,43 +78,23 @@ keytool -genkeypair -keystore release.jks -alias clock -keyalg RSA -keysize 2048
 
 ### 字体与子集
 
-界面默认使用 **霞鹜文楷 Light**（LXGW WenKai，SIL OFL 1.1，© LXGW）。上游完整字体约 28MB，直接放进 APK 太重，所以本项目用的是**按字符子集化**后的 4MB 版本。
+界面默认使用 **霞鹜文楷 Light**（LXGW WenKai v1.520，SIL OFL 1.1，© LXGW）。上游完整字体约 28MB，直接放进 APK 太重，
+所以本项目用的是**按字符子集化**后的版本（约 1.8MB / 3234 字形），这个子集随仓库提供，clone 下来就能构建。
 
-没有字体文件时 App 自动退回系统衬线体，功能不受影响。
-
-自己生成一个子集：
-
-```sh
-pip install fonttools
-curl -LO https://raw.githubusercontent.com/lxgw/LxgwWenKai/main/fonts/TTF/LXGWWenKai-Light.ttf
-pyftsubset LXGWWenKai-Light.ttf --text-file=docs/chars.txt \
-    --output-file=assets/LXGWWenKai-Light.ttf
-cp docs/OFL-LXGWWenKai.txt assets/       # 字体许可随包分发
-```
-
-`docs/chars.txt` 是当前语料 + 界面文案用到的 3060 个字符。**换了自己的语料后记得重新生成它**，否则新语料里没用过的字会显示成方框。
-
-### 签名与校验
-
-Release 里的 APK 用一个**固定的**自签名证书签名（由维护者本机构建后上传；CI 现场生成的临时证书**不用于发布**）：
-
-```
-Owner: CN=Eta Clock, O=Eta
-SHA-256: 56:4A:DE:0B:54:C5:E6:B3:1A:4D:ED:39:79:72:88:1D:5D:96:C8:5E:49:33:05:2C:77:14:C3:C1:C1:77:0D:E1
-有效期: 2026-11-17 → 2054-04-04
-```
-
-自己校验：
+子集是**构建时自动生成**的：`build.sh` 会跑 `tools/make_subset.sh`，它用 `tools/collect_chars.py` 收集
+「语料 + 出处 + 界面文案」用到的全部字符，再交给 `pyftsubset` 切分。换语料后不需要维护字符表，也不会漏字。
 
 ```sh
-keytool -printcert -jarfile clock-1.58.apk | grep SHA256
-jarsigner -verify clock-1.58.apk        # 应输出 "jar verified."
-sha256sum clock-1.58.apk                # 3a5bad7bd318f3d11294461df58a3c374f110a544caa247b73aa94e9575f5d76
+# 手动跑（需要 fonttools：pip install fonttools）
+sh tools/make_subset.sh /path/to/LXGWWenKai-Light.ttf
 ```
 
-自签名证书意味着「签名者自称」，不意味着任何机构背书；它的作用是**保证升级包一致**——换了证书签的包无法覆盖安装。
+找不到全字体或没有 pyftsubset 时，这一步自动跳过，沿用仓库里已有的子集。
 
-## 语料：为什么仓库里只有一部分
+> 早先版本靠手工维护的 `docs/chars.txt`，换语料后漏字，表现为**个别字掉回系统字体**——同一页里混进宋体字形。
+> v2.01 起改为构建时自动收集，这类缺字不会再出现。
+
+## 语料
 
 `assets/clock.json` 是一张静态表，每条形如：
 
@@ -127,15 +107,18 @@ sha256sum clock-1.58.apk                # 3a5bad7bd318f3d11294461df58a3c374f110a
 - `h`：要标红的时间短语（必须是 `s` 的子串）
 - `b`：出处，写成 `作者　《书名》`
 
-**本仓库自带的是公有领域演示语料**：438 句，覆盖 841/1440 分钟，取自诗经、楚辞、唐诗宋词元曲、明清小说、敦煌曲子词、禅宗灯录等。够跑通，也够日常看。
+**仓库里的语料全部是公有领域作品**：1495 句，覆盖 1440/1440 分钟，一天之内不重复。取材自
+诗经、楚辞、先秦诸子、史记汉书、全唐诗、千家诗、宋词三百首、元曲、明清小说（水浒、西游、三国、红楼、
+儒林、聊斋、说岳、金瓶梅）、宋人笔记（东京梦华录、梦粱录、武林旧事、老学庵笔记）与敦煌曲子词。
 
-完整语料（1440 分钟全覆盖）需要**你自己准备**：把额外的条目写成同样格式的 `assets/local-corpus.json`（已 `.gitignore`），再跑：
+**不含仍在版权保护期内的作品**，包括现代小说的中译本。理由见 [ATTRIBUTION.md](ATTRIBUTION.md)：
+那些译文的权利属于原作者与译者，公开分发不属于合理使用。
+
+自带 App 只读这一个文件；想换成自己的句子，直接按上面的格式改 `assets/clock.json` 或用自己的文件构建：
 
 ```sh
-python3 tools/make_clock.py
+CLOCK_CORPUS=/path/to/my-corpus.json sh build.sh
 ```
-
-脚本会把 `tools/classic.json`、`assets/local-corpus.json` 合并，按小时给缺口语料补上候选句，并重新生成 `assets/clock.json`。之所以不直接提供完整语料，是因为其中包含仍在版权保护期内的作品——详见 [ATTRIBUTION.md](ATTRIBUTION.md)。
 
 ## 排班是怎么算的
 

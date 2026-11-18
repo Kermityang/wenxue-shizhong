@@ -9,10 +9,15 @@ release.jks
 assets/local-corpus.json
 local-corpus.json
 
-# 字体（4MB，自行下载，见 README）
-assets/*.ttf
+# 字体：仓库里带子集（约 1.8MB，SIL OFL 1.1），全字体不入库
+# assets/LXGWWenKai-Light.ttf  <-- 这个要提交
 
 # 系统垃圾
 .DS_Store
 *.log
 __pycache__/
+
+# 完整语料（含在版权期译文）只留本地，不进仓库
+local/
+local-corpus.json
+full-corpus.json
