@@ -1241,6 +1241,23 @@ public class MainActivity extends Activity {
             from = to + 1;
         }
 
+        // 首行因为要缩进两字，可用宽度比别的行少两格，常常差一格才到右边。
+        // 只给首行补一点字距（≤0.10em），让它和其余行的右端对齐。
+        if (bookMode && indentMode && spannable.length() > 0) {
+            int firstEnd = text.indexOf('\n');
+            if (firstEnd > 1) {
+                float avail = quoteViewWidth() - size * 2f;
+                float width = metrics.measureText(text, 0, firstEnd);
+                if (width > 0f && width < avail) {
+                    float spacing = (avail - width) / (firstEnd - 1) / Math.max(1f, size);
+                    if (spacing > 0.002f && spacing <= 0.10f) {
+                        spannable.setSpan(new LetterSpacingSpan(spacing), 0, firstEnd,
+                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                }
+            }
+        }
+
         quoteView.setText(spannable);
         if (bookMode) {
             quoteView.post(new Runnable() {
