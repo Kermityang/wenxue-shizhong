@@ -236,7 +236,10 @@ public class MainActivity extends Activity {
             });
             int basePad = (int) (screenWidth * (landscape ? 0.075f : 0.062f));
             contentAvail = screenWidth - 2 * basePad;
-            quoteLayout.setPadding(basePad, 0, basePad, 0);
+            // 正文只拉伸到可用宽度的 98.5%，右边天然多留 1.5%；把右内边距减掉这 1.5%，
+            // 左右留白才真正相等（这是「右边看着空」的来源）
+            int rightPad = basePad - (int) (contentAvail * 0.015f);
+            quoteLayout.setPadding(basePad, 0, rightPad, 0);
 
             // 引文块放进铺满全屏的容器：底部固定给时钟留位，gravity=CENTER 由框架居中。
             // 目标中心 = 屏高 × quoteCenterRatio()，上边距按它反推（方屏 50%，长直板约 42%）。
@@ -809,7 +812,9 @@ public class MainActivity extends Activity {
      * 补满，而拉伸目标也是 98.5%（< 视图宽度），所以再大的拉伸也不会溢出、不会二次换行。
      */
     private float quotePackWidth() {
-        return quoteViewWidth() * 0.985f;
+        // 书页：给「整块居中」的前导边距留 10%；诗：给行尾标点补偿留 4%。
+        // 不留余地的话，边距一加就挤爆行宽，又被 TextView 二次换行（会出现孤字）
+        return quoteViewWidth() * (bookMode ? 0.90f : 0.96f);
     }
 
     /** 拉伸目标：几乎贴到右边距，这样每行右端整齐 */
@@ -891,33 +896,16 @@ public class MainActivity extends Activity {
             clauseEnd[i] = CLOSE_PUNCT.indexOf(cluster.charAt(cluster.length() - 1)) >= 0;
         }
         double limit = avail / size;
-        if (book) {
-            // 书本式：首行缩进两字、每行铺满到右边距、行尾自然收，读起来像一整段文字
-            boolean indentFirst = indent;
-            int[] lines = packBook(widths, limit, indentFirst ? limit - 2 : limit);
-            if (lines.length > 1) {
-                for (double factor = 0.99; factor >= 0.86; factor -= 0.01) {
-                    int[] candidate = packBook(widths, limit * factor,
-                            indentFirst ? limit * factor - 2 : limit * factor);
-                    if (candidate.length != lines.length) {
-                        continue;
-                    }
-                    if (totalUnits(widths, candidate[candidate.length - 2], count) >= 3) {
-                        lines = candidate;
-                        break;
-                    }
-                }
-            }
-            emitLines(display, map, clusters, starts, lines);
-            return;
-        }
+        // 书页和诗都用「均衡断行」：不拉伸、不改字距，靠断点让每行宽度接近，
+        // 右端自然就大体齐平（比强行拉齐更耐看）
+        double firstLimit = (book && indent) ? limit - 2 : limit;
         int base = greedyLineCount(widths, limit);
         int maxLines = paragraph.length() <= 40 ? base + 1 : base;
         int[] breaks = null;
         double bestCost = Double.MAX_VALUE;
         for (int lines = base; lines <= maxLines; lines++) {
             double[] picked = new double[1];
-            int[] candidate = dpBreaks(widths, clauseEnd, limit, lines, picked);
+            int[] candidate = dpBreaks(widths, clauseEnd, limit, firstLimit, lines, picked);
             if (candidate == null) {
                 continue;
             }
@@ -967,8 +955,8 @@ public class MainActivity extends Activity {
      * 在固定行数下找最优断点：行宽尽量均匀（贪心会把字一股脑堆在前几行，剩下孤零零一两个字），
      * 优先断在标点处，末行不足三个字要罚。
      */
-    private static int[] dpBreaks(double[] widths, boolean[] clauseEnd, double limit, int lines,
-                                  double[] costOut) {
+    private static int[] dpBreaks(double[] widths, boolean[] clauseEnd, double limit,
+                                  double firstLimit, int lines, double[] costOut) {
         int count = widths.length;
         double[] prefix = new double[count + 1];
         for (int i = 0; i < count; i++) {
@@ -995,7 +983,8 @@ public class MainActivity extends Activity {
                         continue;
                     }
                     double width = prefix[j] - prefix[i];
-                    if (width > limit + 0.001) {
+                    double allowed = line == 1 ? firstLimit : limit;
+                    if (width > allowed + 0.001) {
                         continue;
                     }
                     double extra = (width - ideal) * (width - ideal);
@@ -1165,85 +1154,61 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        if (bookMode && spannable.length() > 0) {
-            float size = quoteView.getTextSize();
-            int firstBreak = laid.text.indexOf('\n');
-            int firstEnd = firstBreak < 0 ? spannable.length() : firstBreak;
-            // 首行缩进两字：用段落前导边距，不依赖字体里的全角空格字形
-            if (firstEnd > 0 && indentMode) {
+        float size = quoteView.getTextSize();
+        Paint metrics = new Paint(Paint.ANTI_ALIAS_FLAG);
+        if (quoteView.getTypeface() != null) {
+            metrics.setTypeface(quoteView.getTypeface());
+        }
+        metrics.setTextSize(size);
+        Paint.FontMetrics fm = metrics.getFontMetrics();
+        float base = fm.descent - fm.ascent;
+        if (base > 0f && quoteLineMult > 0f) {
+            // 行高钉死，所有行间距一致
+            spannable.setSpan(new FixedLineHeightSpan((int) (base * quoteLineMult)), 0,
+                    spannable.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        quoteView.setLineSpacing(0f, 1f);
+
+        String text = laid.text;
+        float widest = 0f;
+        if (bookMode) {
+            int i = 0;
+            while (i <= text.length()) {
+                int j = text.indexOf('\n', i);
+                if (j < 0) {
+                    j = text.length();
+                }
+                widest = Math.max(widest, metrics.measureText(text, i, j));
+                if (j >= text.length()) {
+                    break;
+                }
+                i = j + 1;
+            }
+        }
+        float viewWidth = quoteView.getWidth() > 0 ? quoteView.getWidth() : contentAvail;
+        // 书页：整块墨迹水平居中（不拉伸字形）；诗：行尾标点补偿半字，视觉才真居中
+        float offset = bookMode ? Math.max(0f, (viewWidth - widest) / 2f) : 0f;
+        int from = 0;
+        while (from < text.length()) {
+            int to = text.indexOf('\n', from);
+            if (to < 0) {
+                to = text.length();
+            }
+            float margin = 0f;
+            if (bookMode) {
+                margin = offset + (from == 0 && indentMode ? size * 2f : 0f);
+            } else if (to > from
+                    && CLOSE_PUNCT.indexOf(text.charAt(to - 1)) >= 0) {
+                margin = size * 0.9f;
+            }
+            if (margin > 0.5f) {
                 spannable.setSpan(new android.text.style.LeadingMarginSpan.Standard(
-                                (int) (size * 2f), 0), 0, firstEnd,
+                                (int) margin, (int) margin), from, to,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            if (quoteView.getTypeface() != null) {
-                paint.setTypeface(quoteView.getTypeface());
-            }
-            paint.setTextSize(quoteView.getTextSize());
-            float target = quoteTargetWidth();
-            // 只有真的加了首行缩进，才从第一行的对齐宽度里扣掉那两字
-            float indent = indentMode ? size * 2f : 0f;
-            int from = 0;
-            while (from < laid.text.length()) {
-                int to = laid.text.indexOf('\n', from);
-                boolean last = to < 0;
-                if (last) {
-                    to = laid.text.length();
-                }
-                float width = paint.measureText(laid.text, from, to);
-                float lineTarget = from == 0 ? target - indent : target;
-                if (!last && width > 0f && width < lineTarget) {
-                    // 不拉字形，只把差的那点宽度摊到字与字之间（中文排版的字距微调），
-                    // 这样每一行的字都一样大，末行不会显得比上面小
-                    float need = lineTarget - width;
-                    int chars = Math.max(1, to - from);
-                    float spacing = need / (chars - 1 > 0 ? chars - 1 : 1) / Math.max(1f, size);
-                    if (spacing > 0.002f && spacing <= 0.12f) {
-                        spannable.setSpan(new LetterSpacingSpan(spacing), from, to,
-                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    }
-                }
-                from = to + 1;
-            }
+            from = to + 1;
         }
-        // 居中的诗行若以收尾标点结尾，行尾会多挂半个字的空白，视觉重心偏左：
-        // 用前导边距把它往右挪半个字，肉眼才真正居中
-        if (!bookMode && spannable.length() > 0) {
-            float size = quoteView.getTextSize();
-            int from = 0;
-            String text = laid.text;
-            while (from < text.length()) {
-                int to = text.indexOf('\n', from);
-                if (to < 0) {
-                    to = text.length();
-                }
-                if (to > from) {
-                    char last = text.charAt(to - 1);
-                    if (CLOSE_PUNCT.indexOf(last) >= 0) {
-                        spannable.setSpan(new android.text.style.LeadingMarginSpan.Standard(
-                                        (int) (size * 0.9f), 0), from, to,
-                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    }
-                }
-                from = to + 1;
-            }
-        }
-        if (spannable.length() > 0) {
-            float size = quoteView.getTextSize();
-            Paint metrics = new Paint(Paint.ANTI_ALIAS_FLAG);
-            if (quoteView.getTypeface() != null) {
-                metrics.setTypeface(quoteView.getTypeface());
-            }
-            metrics.setTextSize(size);
-            Paint.FontMetrics fm = metrics.getFontMetrics();
-            float base = fm.descent - fm.ascent;
-            float mult = quoteLineMult;
-            if (base > 0f && mult > 0f) {
-                spannable.setSpan(new FixedLineHeightSpan((int) (base * mult)), 0, spannable.length(),
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-            quoteView.setLineSpacing(0f, 1f);
-        }
+
         quoteView.setText(spannable);
     }
 
