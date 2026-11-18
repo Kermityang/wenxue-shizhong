@@ -677,12 +677,14 @@ public class MainActivity extends Activity {
         final int[] map;
         final int lines;
         final float widest;
+        final java.util.Set<Integer> paraStarts;   // 每个自然段首字在 text 里的下标（缩进用）
 
-        Laid(String text, int[] map, int lines, float widest) {
+        Laid(String text, int[] map, int lines, float widest, java.util.Set<Integer> paraStarts) {
             this.text = text;
             this.map = map;
             this.lines = lines;
             this.widest = widest;
+            this.paraStarts = paraStarts;
         }
     }
 
@@ -1032,10 +1034,16 @@ public class MainActivity extends Activity {
 
         StringBuilder display = new StringBuilder();
         List<Integer> map = new ArrayList<>();
+        java.util.Set<Integer> paraStarts = new java.util.HashSet<>();
         int from = 0;
         for (int i = 0; i <= source.length(); i++) {
             if (i == source.length() || source.charAt(i) == '\n') {
                 if (i > from) {
+                    if (display.length() == 0) {
+                        paraStarts.add(0);
+                    } else {
+                        paraStarts.add(display.length() + 1);   // emitLines 会先补一个换行
+                    }
                     appendParagraph(display, map, source.substring(from, i), from, paint, size, avail,
                             book, indent);
                 }
@@ -1048,6 +1056,8 @@ public class MainActivity extends Activity {
             for (int i = 0; i < source.length(); i++) {
                 map.add(i);
             }
+            paraStarts.clear();
+            paraStarts.add(0);
         }
         int[] offsets = new int[map.size()];
         for (int i = 0; i < offsets.length; i++) {
@@ -1059,7 +1069,7 @@ public class MainActivity extends Activity {
         for (String row : rows) {
             widest = Math.max(widest, paint.measureText(row));
         }
-        return new Laid(text, offsets, rows.length, widest);
+        return new Laid(text, offsets, rows.length, widest, paraStarts);
     }
 
     /** 在「句子中间」断开（这一行没有标点收尾）的代价 */
@@ -1426,7 +1436,7 @@ public class MainActivity extends Activity {
             }
             float margin = 0f;
             if (bookMode) {
-                margin = (from == 0 && indentMode) ? size * 2f : 0f;
+                margin = (indentMode && laid.paraStarts.contains(from)) ? size * 2f : 0f;
             } else if (to > from && CLOSE_PUNCT.indexOf(text.charAt(to - 1)) >= 0) {
                 // 诗行：行尾标点占满一个字宽但墨迹偏左，右移约半个字才看着居中
                 margin = size * 0.9f;
