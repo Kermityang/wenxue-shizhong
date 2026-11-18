@@ -136,6 +136,7 @@ public class MainActivity extends Activity {
     private FrameLayout quoteContainer;
     private int screenHeightPx;
     private int lastQuoteWidth;
+    private int contentAvail;
     private int timeoutMinutes = 30;
 
     private final Runnable minuteTick = new Runnable() {
@@ -232,8 +233,9 @@ public class MainActivity extends Activity {
                     }
                 }
             });
-            int sidePadding = (int) (screenWidth * (landscape ? 0.075f : 0.062f));
-            quoteLayout.setPadding(sidePadding, 0, sidePadding, 0);
+            int basePad = (int) (screenWidth * (landscape ? 0.075f : 0.062f));
+            contentAvail = screenWidth - 2 * basePad;
+            quoteLayout.setPadding(basePad, 0, basePad, 0);
 
             // 引文块放进铺满全屏的容器：底部固定给时钟留位，gravity=CENTER 由框架居中。
             // 目标中心 = 屏高 × quoteCenterRatio()，上边距按它反推（方屏 50%，长直板约 42%）。
@@ -542,11 +544,6 @@ public class MainActivity extends Activity {
         float room = quoteRoomHeight();
         indentMode = bookMode;
         Laid laid = layoutQuote(quoteText, quoteSize, bookMode, indentMode);
-        if (bookMode && laid.lines < 3) {
-            // 只有一两行的摘录（现代诗、短对白）不做首行缩进
-            indentMode = false;
-            laid = layoutQuote(quoteText, quoteSize, bookMode, indentMode);
-        }
         while (estimateHeight(laid.lines, quoteSize, mult) > room && quoteSize > baseQuoteSize * 0.72f) {
             quoteSize *= 0.92f;
             quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
@@ -758,16 +755,27 @@ public class MainActivity extends Activity {
     }
 
     /** 引文可用宽度，留 3% 余量：自己量出来的行宽只要比 TextView 内部换行宽半点，就会又冒出一个孤字 */
-    private float quoteWidth() {
-        // 优先用引文视图的实测宽度：横竖屏重建时 displayMetrics 可能还是旧值，
-        // 按旧宽度装行会让每一行都短一截，右半边空着（横屏「右边特别空」就是这个原因）
+    /** 引文视图的实测宽度（横竖屏重建时 displayMetrics 可能还是旧值） */
+    private float quoteViewWidth() {
         int width = quoteView != null ? quoteView.getWidth() : 0;
         if (width <= 0) {
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int padding = (int) (screenWidth * (landscape ? 0.075f : 0.062f));
-            width = screenWidth - 2 * padding;
+            width = contentAvail;
         }
-        return Math.max(60f, width * 0.97f);
+        return Math.max(60f, width);
+    }
+
+    /** 装行宽度：留出 10% 给横向拉伸，保证「拉伸后也不会超出视图宽度」而再换一次行 */
+    private float quotePackWidth() {
+        return quoteViewWidth() * 0.90f;
+    }
+
+    /** 拉伸目标：几乎贴到右边距，这样每行右端整齐 */
+    private float quoteTargetWidth() {
+        return quoteViewWidth() * 0.985f;
+    }
+
+    private float quoteWidth() {
+        return quotePackWidth();
     }
 
     /**
@@ -842,7 +850,7 @@ public class MainActivity extends Activity {
         double limit = avail / size;
         if (book) {
             // 书本式：首行缩进两字、每行铺满到右边距、行尾自然收，读起来像一整段文字
-            boolean indentFirst = indent && display.length() == 0;
+            boolean indentFirst = indent;
             int[] lines = packBook(widths, limit, indentFirst ? limit - 2 : limit);
             if (lines.length > 1) {
                 for (double factor = 0.99; factor >= 0.86; factor -= 0.01) {
@@ -1129,7 +1137,7 @@ public class MainActivity extends Activity {
                 paint.setTypeface(quoteView.getTypeface());
             }
             paint.setTextSize(quoteView.getTextSize());
-            float target = quoteWidth();
+            float target = quoteTargetWidth();
             // 只有真的加了首行缩进，才从第一行的对齐宽度里扣掉那两字
             float indent = indentMode ? size * 2f : 0f;
             int from = 0;
