@@ -909,10 +909,7 @@ public class MainActivity extends Activity {
             // 这样字符的右端能对齐，只有标点伸出去一点，肉眼反而整齐
             double hang = 1.0;   // 一个字的悬挂余量
             double firstLimit = indent ? quoteFirstLineWidth() / size : limit;
-            if (!indent) {
-                firstLimit = limit;
-            }
-            int[] lines = packBookHang(widths, starts, clusters, limit, firstLimit, hang);
+            int[] lines = packBookHang(widths, starts, clusters, limit, firstLimit, 1.0);
             emitLines(display, map, clusters, starts, lines);
             return;
         }
@@ -1228,7 +1225,6 @@ public class MainActivity extends Activity {
             }
             float margin = 0f;
             if (bookMode) {
-                // 只有第一行缩进两字（装行时已经预留，不会挤爆行宽）
                 margin = (from == 0 && indentMode) ? size * 2f : 0f;
             } else if (to > from && CLOSE_PUNCT.indexOf(text.charAt(to - 1)) >= 0) {
                 // 诗行：行尾标点占满一个字宽但墨迹偏左，右移约半个字才看着居中
@@ -1239,23 +1235,6 @@ public class MainActivity extends Activity {
                                 (int) margin, 0), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             from = to + 1;
-        }
-
-        // 首行因为要缩进两字，可用宽度比别的行少两格，常常差一格才到右边。
-        // 只给首行补一点字距（≤0.10em），让它和其余行的右端对齐。
-        if (bookMode && indentMode && spannable.length() > 0) {
-            int firstEnd = text.indexOf('\n');
-            if (firstEnd > 1) {
-                float avail = quoteViewWidth() - size * 2f;
-                float width = metrics.measureText(text, 0, firstEnd);
-                if (width > 0f && width < avail) {
-                    float spacing = (avail - width) / (firstEnd - 1) / Math.max(1f, size);
-                    if (spacing > 0.002f && spacing <= 0.10f) {
-                        spannable.setSpan(new LetterSpacingSpan(spacing), 0, firstEnd,
-                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    }
-                }
-            }
         }
 
         quoteView.setText(spannable);
