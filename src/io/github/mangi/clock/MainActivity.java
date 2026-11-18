@@ -1104,7 +1104,8 @@ public class MainActivity extends Activity {
             }
             paint.setTextSize(quoteView.getTextSize());
             float target = quoteWidth();
-            float indent = size * 2f;
+            // 只有真的加了首行缩进，才从第一行的对齐宽度里扣掉那两字
+            float indent = indentMode ? size * 2f : 0f;
             int from = 0;
             while (from < laid.text.length()) {
                 int to = laid.text.indexOf('\n', from);
@@ -1115,7 +1116,8 @@ public class MainActivity extends Activity {
                 float width = paint.measureText(laid.text, from, to);
                 float lineTarget = from == 0 ? target - indent : target;
                 if (!last && width > 0f && width < lineTarget) {
-                    float scale = Math.min(1.06f, lineTarget / width);
+                    // 每行结尾通常差不到一个字，靠横向拉伸补满（上限 10%），右端才会齐
+                    float scale = Math.min(1.10f, lineTarget / width);
                     if (scale > 1.005f) {
                         spannable.setSpan(new ScaleXSpan(scale), from, to,
                                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
