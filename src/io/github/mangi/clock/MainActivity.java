@@ -611,6 +611,25 @@ public class MainActivity extends Activity {
         quoteContainer.setPadding(0, quoteTopPad, 0, quoteBottomPad);
     }
 
+    /** 只改字间距、不变字形的 span：中文两端对齐的正规做法 */
+    private static final class LetterSpacingSpan extends android.text.style.MetricAffectingSpan {
+        private final float spacing;
+
+        LetterSpacingSpan(float spacing) {
+            this.spacing = spacing;
+        }
+
+        @Override
+        public void updateDrawState(android.text.TextPaint paint) {
+            paint.setLetterSpacing(spacing);
+        }
+
+        @Override
+        public void updateMeasureState(android.text.TextPaint paint) {
+            paint.setLetterSpacing(spacing);
+        }
+    }
+
     /** 出处排版：太长就缩字号，缩到 0.7 倍仍放不下就在书名号/括号处折成两行，避免被屏幕切掉 */
     private void layOutSource(String raw) {
         String text = raw == null ? "" : raw;
@@ -1153,10 +1172,13 @@ public class MainActivity extends Activity {
                 float width = paint.measureText(laid.text, from, to);
                 float lineTarget = from == 0 ? target - indent : target;
                 if (!last && width > 0f && width < lineTarget) {
-                    // 每行结尾通常差不到一个字，靠横向拉伸补满（上限 10%），右端才会齐
-                    float scale = Math.min(1.10f, lineTarget / width);
-                    if (scale > 1.005f) {
-                        spannable.setSpan(new ScaleXSpan(scale), from, to,
+                    // 不拉字形，只把差的那点宽度摊到字与字之间（中文排版的字距微调），
+                    // 这样每一行的字都一样大，末行不会显得比上面小
+                    float need = lineTarget - width;
+                    int chars = Math.max(1, to - from);
+                    float spacing = need / (chars - 1 > 0 ? chars - 1 : 1) / Math.max(1f, size);
+                    if (spacing > 0.002f && spacing <= 0.12f) {
+                        spannable.setSpan(new LetterSpacingSpan(spacing), from, to,
                                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                 }
