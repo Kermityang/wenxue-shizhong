@@ -618,7 +618,7 @@ public class MainActivity extends Activity {
         float quoteSize = typeBase * ratio;
         float mult = textLen > 40 ? 1.55f : 1.75f;
         quoteLineMult = mult;
-        bookMode = isBookText(text);
+        bookMode = isBookText(text, book);
         quoteView.setLineSpacing(0f, mult);
         quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
         baseQuoteSize = quoteSize;
@@ -779,7 +779,7 @@ public class MainActivity extends Activity {
     }
 
     /** 小说、散文按书本排（≥两句，或超过 40 字）；短诗仍按句读居中 */
-    private static boolean isBookText(String text) {
+    private static boolean isBookText(String text, String source) {
         if (text == null) {
             return false;
         }
@@ -798,8 +798,10 @@ public class MainActivity extends Activity {
                 clause = 0;
             } else {
                 clause++;
-                // 一句里带长从句（>8 字）的是散文/小说句子，按诗居中排会跨字断行
-                if (clause > 8) {
+                // 从句超过 7 字就是散文/小说句子（七言诗正好 7 字）；
+                // 元曲这类韵文放宽到 8 字，避免把唱词排成段落
+                int limit = (source != null && source.contains("元曲")) ? 8 : 7;
+                if (clause > limit) {
                     return true;
                 }
             }
