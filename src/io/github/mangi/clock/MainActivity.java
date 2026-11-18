@@ -128,6 +128,7 @@ public class MainActivity extends Activity {
     private float baseQuoteSize = 40f;
     private float quoteScale = 1f;
     private int shrinkSteps = 0;
+    private float quoteLineMult = 1.75f;
     private boolean adjusting = false;
     private boolean bookMode = false;
     private boolean indentMode = false;
@@ -534,6 +535,7 @@ public class MainActivity extends Activity {
         }
         float quoteSize = typeBase * ratio;
         float mult = textLen > 40 ? 1.55f : 1.75f;
+        quoteLineMult = mult;
         bookMode = isBookText(text);
         quoteView.setLineSpacing(0f, mult);
         quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
@@ -609,6 +611,25 @@ public class MainActivity extends Activity {
                 : getResources().getDisplayMetrics().heightPixels;
         quoteTopPad = (int) Math.max(0f, 2f * height * quoteCenterRatio() - height + quoteBottomPad);
         quoteContainer.setPadding(0, quoteTopPad, 0, quoteBottomPad);
+    }
+
+    /** 把每一行的高度钉死成同一个值，避免个别行（有无字距 span、标点不同）行高漂移 */
+    private static final class FixedLineHeightSpan implements android.text.style.LineHeightSpan {
+        private final int height;
+
+        FixedLineHeightSpan(int height) {
+            this.height = height;
+        }
+
+        @Override
+        public void chooseHeight(CharSequence text, int start, int end, int spanstartv,
+                                 int lineHeight, android.graphics.Paint.FontMetricsInt fm) {
+            int center = (fm.ascent + fm.descent) / 2;
+            fm.ascent = center - height / 2;
+            fm.descent = center + height / 2;
+            fm.top = fm.ascent;
+            fm.bottom = fm.descent;
+        }
     }
 
     /** 只改字间距、不变字形的 span：中文两端对齐的正规做法 */
@@ -1184,6 +1205,22 @@ public class MainActivity extends Activity {
                 }
                 from = to + 1;
             }
+        }
+        if (spannable.length() > 0) {
+            float size = quoteView.getTextSize();
+            Paint metrics = new Paint(Paint.ANTI_ALIAS_FLAG);
+            if (quoteView.getTypeface() != null) {
+                metrics.setTypeface(quoteView.getTypeface());
+            }
+            metrics.setTextSize(size);
+            Paint.FontMetrics fm = metrics.getFontMetrics();
+            float base = fm.descent - fm.ascent;
+            float mult = quoteLineMult;
+            if (base > 0f && mult > 0f) {
+                spannable.setSpan(new FixedLineHeightSpan((int) (base * mult)), 0, spannable.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            quoteView.setLineSpacing(0f, 1f);
         }
         quoteView.setText(spannable);
     }
