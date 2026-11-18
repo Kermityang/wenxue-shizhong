@@ -129,6 +129,7 @@ public class MainActivity extends Activity {
     private float quoteScale = 1f;
     private int shrinkSteps = 0;
     private float quoteLineMult = 1.75f;
+    private float currentQuoteSize = 60f;
     private boolean adjusting = false;
     private boolean bookMode = false;
     private boolean indentMode = false;
@@ -543,6 +544,7 @@ public class MainActivity extends Activity {
         quoteView.setLineSpacing(0f, mult);
         quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
         baseQuoteSize = quoteSize;
+        currentQuoteSize = quoteSize;
         quoteScale = 1f;
         shrinkSteps = 0;
         // 块太高就逐档缩字号，保证整块落在「时钟上方」那块地里
@@ -811,15 +813,21 @@ public class MainActivity extends Activity {
      * 装行宽度：两种模式都按 98.5% 断行。书页模式随后用横向拉伸把「差那一两个字」的空隙
      * 补满，而拉伸目标也是 98.5%（< 视图宽度），所以再大的拉伸也不会溢出、不会二次换行。
      */
+    /** 版心宽度：书页扣掉行末标点悬挂的一字，其余全给文字（字符才能靠到右边界） */
     private float quotePackWidth() {
-        // 书页：给「整块居中」的前导边距留 10%；诗：给行尾标点补偿留 4%。
-        // 不留余地的话，边距一加就挤爆行宽，又被 TextView 二次换行（会出现孤字）
-        return quoteViewWidth() * (bookMode ? 0.90f : 0.96f);
+        float view = quoteViewWidth();
+        if (bookMode) {
+            return Math.max(80f, view - currentQuoteSize * 1.05f);
+        }
+        return Math.max(80f, view * 0.96f);
     }
 
-    /** 拉伸目标：几乎贴到右边距，这样每行右端整齐 */
-    private float quoteTargetWidth() {
-        return quoteViewWidth() * 0.985f;
+    /** 首行可用宽度：书页首行再让出两字缩进 */
+    private float quoteFirstLineWidth() {
+        if (!bookMode) {
+            return quotePackWidth();
+        }
+        return Math.max(80f, quotePackWidth() - currentQuoteSize * 2.1f);
     }
 
     private float quoteWidth() {
@@ -896,9 +904,19 @@ public class MainActivity extends Activity {
             clauseEnd[i] = CLOSE_PUNCT.indexOf(cluster.charAt(cluster.length() - 1)) >= 0;
         }
         double limit = avail / size;
-        // 书页和诗都用「均衡断行」：不拉伸、不改字距，靠断点让每行宽度接近，
-        // 右端自然就大体齐平（比强行拉齐更耐看）
-        double firstLimit = (book && indent) ? limit - 2 : limit;
+        if (book) {
+            // 书页：满行装字，行末若是收尾标点就让它悬挂到版心外（中文书籍的常规做法），
+            // 这样字符的右端能对齐，只有标点伸出去一点，肉眼反而整齐
+            double hang = 1.0;   // 一个字的悬挂余量
+            double firstLimit = indent ? quoteFirstLineWidth() / size : limit;
+            if (!indent) {
+                firstLimit = limit;
+            }
+            int[] lines = packBookHang(widths, starts, clusters, limit, firstLimit, hang);
+            emitLines(display, map, clusters, starts, lines);
+            return;
+        }
+        double firstLimit = limit;
         int base = greedyLineCount(widths, limit);
         int maxLines = paragraph.length() <= 40 ? base + 1 : base;
         int[] breaks = null;
@@ -1077,6 +1095,38 @@ public class MainActivity extends Activity {
         return lines;
     }
 
+    /**
+     * 书页装行：先把字填到版心宽度 limit；若下一个单元是收尾标点，且放进悬挂区（limit+hang）不超，
+     * 就把它挂在行尾。字符右端因此对齐，标点凸出到版心外。
+     */
+    private static int[] packBookHang(double[] widths, List<Integer> starts, List<String> clusters,
+                                      double limit, double firstLimit, double hang) {
+        List<Integer> breaks = new ArrayList<>();
+        double current = 0;
+        for (int i = 0; i < widths.length; i++) {
+            double allowed = breaks.isEmpty() ? firstLimit : limit;
+            if (current > 0 && current + widths[i] > allowed) {
+                String cluster = clusters.get(i);
+                char last = cluster.charAt(cluster.length() - 1);
+                boolean hangs = CLOSE_PUNCT.indexOf(last) >= 0;
+                if (hangs && current + widths[i] <= allowed + hang) {
+                    breaks.add(i + 1);   // 标点挂在本行末尾
+                    current = 0;
+                    continue;
+                }
+                breaks.add(i);
+                current = 0;
+            }
+            current += widths[i];
+        }
+        breaks.add(widths.length);
+        int[] result = new int[breaks.size()];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = breaks.get(i);
+        }
+        return result;
+    }
+
     /** 书本式装行：首行给缩进留出两字，其余行铺满 */
     private static int[] packBook(double[] widths, double limit, double firstLimit) {
         List<Integer> breaks = new ArrayList<>();
@@ -1170,24 +1220,6 @@ public class MainActivity extends Activity {
         quoteView.setLineSpacing(0f, 1f);
 
         String text = laid.text;
-        float widest = 0f;
-        if (bookMode) {
-            int i = 0;
-            while (i <= text.length()) {
-                int j = text.indexOf('\n', i);
-                if (j < 0) {
-                    j = text.length();
-                }
-                widest = Math.max(widest, metrics.measureText(text, i, j));
-                if (j >= text.length()) {
-                    break;
-                }
-                i = j + 1;
-            }
-        }
-        float viewWidth = quoteView.getWidth() > 0 ? quoteView.getWidth() : contentAvail;
-        // 书页：整块墨迹水平居中（不拉伸字形）；诗：行尾标点补偿半字，视觉才真居中
-        float offset = bookMode ? Math.max(0f, (viewWidth - widest) / 2f) : 0f;
         int from = 0;
         while (from < text.length()) {
             int to = text.indexOf('\n', from);
@@ -1196,15 +1228,15 @@ public class MainActivity extends Activity {
             }
             float margin = 0f;
             if (bookMode) {
-                margin = offset + (from == 0 && indentMode ? size * 2f : 0f);
-            } else if (to > from
-                    && CLOSE_PUNCT.indexOf(text.charAt(to - 1)) >= 0) {
+                // 只有第一行缩进两字（装行时已经预留，不会挤爆行宽）
+                margin = (from == 0 && indentMode) ? size * 2f : 0f;
+            } else if (to > from && CLOSE_PUNCT.indexOf(text.charAt(to - 1)) >= 0) {
+                // 诗行：行尾标点占满一个字宽但墨迹偏左，右移约半个字才看着居中
                 margin = size * 0.9f;
             }
             if (margin > 0.5f) {
                 spannable.setSpan(new android.text.style.LeadingMarginSpan.Standard(
-                                (int) margin, (int) margin), from, to,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                                (int) margin, 0), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             from = to + 1;
         }
