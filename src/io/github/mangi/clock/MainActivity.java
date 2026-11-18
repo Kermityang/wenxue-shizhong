@@ -142,6 +142,7 @@ public class MainActivity extends Activity {
     private FrameLayout quoteContainer;
     private int screenHeightPx;
     private int lastQuoteWidth;
+    private int layoutGeneration;   // 排版代数：旧的 post 任务看到代数变了就作废
     private int contentAvail;
     private int timeoutMinutes = 30;
 
@@ -1449,27 +1450,35 @@ public class MainActivity extends Activity {
         }
 
         quoteView.setText(spannable);
-        if (bookMode) {
-            quoteView.post(new Runnable() {
-                @Override
-                public void run() {
-                    if (quoteView == null || quoteView.getLayout() == null) {
-                        return;
-                    }
-                    android.text.Layout layout = quoteView.getLayout();
-                    float widest = 0f;
-                    for (int i = 0; i < layout.getLineCount(); i++) {
-                        widest = Math.max(widest, layout.getLineWidth(i));
-                    }
-                    float dx = Math.max(0f, (quoteView.getWidth() - widest) / 2f);
-                    if (Math.abs(quoteView.getTranslationX() - dx) > 1f) {
-                        quoteView.setTranslationX(dx);
-                    }
+        // 横向位移统一在布局完成之后重算，并用代数作废掉之前排队的旧任务。
+        // 旧任务的布局已经换成新的一句，却还按老条件设位移，就会把整块推到右边
+        // （从后台切回、连续两次 render 时偶发，转一下屏重建又会好）。
+        final int generation = ++layoutGeneration;
+        final boolean book = bookMode;
+        quoteView.setTranslationX(0f);
+        quoteView.post(new Runnable() {
+            @Override
+            public void run() {
+                if (quoteView == null || generation != layoutGeneration) {
+                    return;
                 }
-            });
-        } else if (quoteView != null) {
-            quoteView.setTranslationX(0f);
-        }
+                quoteView.setTranslationX(0f);
+                if (!book) {
+                    return;
+                }
+                android.text.Layout layout = quoteView.getLayout();
+                int width = quoteView.getWidth();
+                if (layout == null || width <= 0) {
+                    return;
+                }
+                float widest = 0f;
+                for (int i = 0; i < layout.getLineCount(); i++) {
+                    widest = Math.max(widest, layout.getLineWidth(i));
+                }
+                float dx = Math.max(0f, (width - widest) / 2f);
+                quoteView.setTranslationX(dx);
+            }
+        });
     }
 
     private void applyPalette() {
@@ -1507,6 +1516,18 @@ public class MainActivity extends Activity {
             applyPalette();
             handler.removeCallbacks(minuteTick);
             render();
+            // 从后台回来时窗口可能还没重新量过，等一帧再排一次，
+            // 避免拿旧宽度算出的位移留在屏上（整块偏右的另一个来源）
+            if (rootView != null) {
+                rootView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (rootView != null && rootView.getWidth() > 0) {
+                            render();
+                        }
+                    }
+                });
+            }
             handler.postDelayed(minuteTick, delayToNextMinute());
             scheduleAutoExit();
         }
