@@ -85,8 +85,9 @@ SHA-256: 56:4A:DE:0B:54:C5:E6:B3:1A:4D:ED:39:79:72:88:1D:5D:96:C8:5E:49:33:05:2C
 自己校验：
 
 ```sh
-keytool -printcert -jarfile clock-1.37.apk | grep SHA256
-jarsigner -verify clock-1.37.apk        # 应输出 "jar verified."
+keytool -printcert -jarfile clock-1.58.apk | grep SHA256
+jarsigner -verify clock-1.58.apk        # 应输出 "jar verified."
+sha256sum clock-1.58.apk                # 3a5bad7bd318f3d11294461df58a3c374f110a544caa247b73aa94e9575f5d76
 ```
 
 自签名证书意味着「签名者自称」，不意味着任何机构背书；它的作用是**保证升级包一致**——换了证书签的包无法覆盖安装。
