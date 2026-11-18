@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
+import android.text.style.ScaleXSpan;
 import android.util.TypedValue;
 import android.view.GestureDetector;
 import android.view.Gravity;
@@ -69,14 +70,21 @@ public class MainActivity extends Activity {
         final int clock;
         final int date;
         final int highlight;
+        final boolean boldHighlight;
 
         Palette(int background, int quote, int book, int clock, int date, int highlight) {
+            this(background, quote, book, clock, date, highlight, false);
+        }
+
+        Palette(int background, int quote, int book, int clock, int date, int highlight,
+                boolean boldHighlight) {
             this.background = background;
             this.quote = quote;
             this.book = book;
             this.clock = clock;
             this.date = date;
             this.highlight = highlight;
+            this.boldHighlight = boldHighlight;
         }
     }
 
@@ -92,7 +100,7 @@ public class MainActivity extends Activity {
     /** 黑白墨水屏：纯白底、纯黑字，不做彩色强调（红色在墨水屏上只剩灰） */
     private static final Palette INK = new Palette(
             Color.WHITE, Color.BLACK, Color.rgb(64, 64, 64),
-            Color.rgb(48, 48, 48), Color.rgb(112, 112, 112), Color.BLACK);
+            Color.rgb(48, 48, 48), Color.rgb(112, 112, 112), Color.BLACK, true);
     private static final Palette MOON = new Palette(
             Color.rgb(233, 229, 218), Color.rgb(35, 32, 27), Color.rgb(107, 101, 92),
             Color.rgb(85, 81, 74), Color.rgb(126, 120, 110), Color.rgb(168, 58, 44));
@@ -120,6 +128,12 @@ public class MainActivity extends Activity {
     private float baseQuoteSize = 40f;
     private float quoteScale = 1f;
     private boolean adjusting = false;
+    private boolean bookMode = false;
+    private int quoteTopPad;
+    private int quoteBottomPad;
+    private FrameLayout quoteContainer;
+    private int screenHeightPx;
+    private int lastQuoteWidth;
     private int timeoutMinutes = 30;
 
     private final Runnable minuteTick = new Runnable() {
@@ -200,23 +214,33 @@ public class MainActivity extends Activity {
             quoteLayout.setCameraDistance(12000 * getResources().getDisplayMetrics().density);
             int sidePadding = (int) (screenWidth * (landscape ? 0.075f : 0.062f));
             quoteLayout.setPadding(sidePadding, 0, sidePadding, 0);
-            FrameLayout.LayoutParams quoteParams = new FrameLayout.LayoutParams(
+
+            // 引文块放进铺满全屏的容器：底部固定给时钟留位，gravity=CENTER 由框架居中。
+            // 目标中心 = 屏高 × quoteCenterRatio()，上边距按它反推（方屏 50%，长直板约 42%）。
+            quoteContainer = new FrameLayout(this);
+            quoteBottomPad = (int) (shortSide * (landscape ? 0.20f : 0.264f));
+            quoteTopPad = (int) Math.max(0f,
+                    2f * screenHeight * quoteCenterRatio() - screenHeight + quoteBottomPad);
+            quoteContainer.setPadding(0, quoteTopPad, 0, quoteBottomPad);
+            quoteContainer.addView(quoteLayout, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT);
-            if (landscape) {
-                // 横屏又长又扁，整块垂直居中最好看
-                quoteParams.gravity = Gravity.CENTER;
-            } else {
-                baseTopMargin = (int) (screenHeight * 0.30f);
-                quoteParams.topMargin = baseTopMargin;
-            }
-            rootView.addView(quoteLayout, quoteParams);
-            // 按句读断行后有的短句会多占一行，块变高了要能自己往上让，别压到右下角时钟
-            quoteLayout.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                    FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+            rootView.addView(quoteContainer, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            // 实测宽度一确定（含旋转后重新布局）就按真实宽度重排一次，横屏才不会每行短一截
+            rootView.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
                 @Override
                 public void onLayoutChange(View view, int left, int top, int right, int bottom,
                                            int oldLeft, int oldTop, int oldRight, int oldBottom) {
-                    fitQuoteVertically(bottom - top);
+                    if (quoteView == null) {
+                        return;
+                    }
+                    int width = quoteView.getWidth();
+                    if (width > 0 && width != lastQuoteWidth) {
+                        lastQuoteWidth = width;
+                        render();
+                    }
                 }
             });
 
@@ -472,32 +496,22 @@ public class MainActivity extends Activity {
             ratio = 0.038f;
         }
         float quoteSize = typeBase * ratio;
+        float mult = textLen > 40 ? 1.55f : 1.75f;
+        bookMode = isBookText(text);
+        quoteView.setLineSpacing(0f, mult);
         quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
-        quoteView.setLineSpacing(0f, textLen > 40 ? 1.55f : 1.75f);
-        Laid laid = layoutQuote(quoteText, quoteSize);
-        // 短诗撑到 72% 行宽（五言、对联这类两行且明显偏窄的才放大）；再大就显得不精致了
-        float fill = 1f;
-        if (laid.lines >= 2 && laid.lines <= 3 && laid.widest > 0f) {
-            float target = quoteWidth() * 0.72f;
-            if (laid.widest < target * 0.97f) {
-                fill = Math.min(1.4f, target / laid.widest);
-            }
-        }
-        if (fill > 1.03f) {
-            Laid filled = layoutQuote(quoteText, quoteSize * fill);
-            if (filled.lines <= 3 && filled.widest <= quoteWidth()) {
-                quoteSize *= fill;
-                quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
-                laid = filled;
-            } else {
-                fill = 1f;
-            }
-        }
         baseQuoteSize = quoteSize;
         quoteScale = 1f;
+        // 块太高就逐档缩字号，保证整块落在「时钟上方」那块地里
+        float room = quoteRoomHeight();
+        Laid laid = layoutQuote(quoteText, quoteSize, bookMode);
+        while (estimateHeight(laid.lines, quoteSize, mult) > room && quoteSize > baseQuoteSize * 0.72f) {
+            quoteSize *= 0.92f;
+            quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
+            laid = layoutQuote(quoteText, quoteSize, bookMode);
+        }
         applyLaid(laid);
-        // 正文字号放大了，出处跟着放大一点，别显得孤零零一小行
-        bookView.setTextSize(TypedValue.COMPLEX_UNIT_PX, sourceBase * (fill > 1.03f ? 1.2f : 1f));
+        bookView.setTextSize(TypedValue.COMPLEX_UNIT_PX, sourceBase);
         bookView.setText(formatSource(book));
 
         timeView.setText(new SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -548,50 +562,97 @@ public class MainActivity extends Activity {
     /** 不许留在行尾的起首标点 */
     private static final String OPEN_PUNCT = "（【《「『“‘([{";
 
-    /** 竖屏下块太长时整块上移，保证出处还落在时钟上方（横屏本来就是居中，不动） */
-    private void fitQuoteVertically(int height) {
-        if (landscape || height <= 0 || clockLayout == null || clockLayout.getTop() <= 0) {
-            return;
+    /** 小说、散文按书本排（≥两句，或超过 40 字）；短诗仍按句读居中 */
+    private static boolean isBookText(String text) {
+        if (text == null) {
+            return false;
         }
-        ViewGroup.LayoutParams raw = quoteLayout.getLayoutParams();
-        if (!(raw instanceof FrameLayout.LayoutParams)) {
-            return;
+        if (text.length() > 40) {
+            return true;
         }
-        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) raw;
-        int limit = clockLayout.getTop() - (int) (shortSide * 0.022f);
-        int top = baseTopMargin;
-        int floor = (int) (shortSide * 0.055f);
-        if (top + height > limit) {
-            top = Math.max(floor, limit - height);
+        int sentences = 0;
+        int clause = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '。' || c == '！' || c == '？') {
+                sentences++;
+            }
+            if (c == '，' || c == '。' || c == '；' || c == '：' || c == '！' || c == '？'
+                    || c == '、' || c == '…') {
+                clause = 0;
+            } else {
+                clause++;
+                // 一句里带长从句（>10 字）的是散文/小说句子，按诗居中排会跨字断行
+                if (clause > 10) {
+                    return true;
+                }
+            }
         }
-        if (params.topMargin != top) {
-            params.topMargin = top;
-            quoteLayout.setLayoutParams(params);
+        return sentences >= 2;
+    }
+
+    private float bookMargin() {
+        return shortSide * (landscape ? 0.062f : 0.089f);
+    }
+
+    /** 用字体度量算一行的高度，和 TextView 的实际行高对得上，不再拍系数 */
+    private float lineHeight(float size, float mult) {
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        if (quoteView != null && quoteView.getTypeface() != null) {
+            paint.setTypeface(quoteView.getTypeface());
         }
-        // 最长的那几条（含硬换行的长段落）上移到顶仍放不下：逐档缩字号，别让它压住时钟
-        if (!adjusting && top + height > limit && height > limit - floor && quoteScale > 0.78f) {
-            adjusting = true;
-            quoteScale *= 0.9f;
-            float size = baseQuoteSize * quoteScale;
-            quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
-            applyQuoteText(size);
-            adjusting = false;
+        paint.setTextSize(size);
+        Paint.FontMetrics metrics = paint.getFontMetrics();
+        float height = metrics.descent - metrics.ascent;
+        if (height <= 0f) {
+            height = size * 1.15f;
         }
+        return height * mult;
+    }
+
+    private float estimateHeight(int lines, float size, float mult) {
+        return lines * lineHeight(size, mult) + bookMargin() + lineHeight(sourceBase, 1f);
+    }
+
+    /**
+     * 引文块目标中心（占屏高比例）：方屏 47% 正好；长直板屏太富余，47% 会显得吊在中间，
+     * 所以屏越高越往上收，最低 42%。
+     */
+    private float quoteCenterRatio() {
+        int height = screenHeightPx > 0 ? screenHeightPx
+                : getResources().getDisplayMetrics().heightPixels;
+        float aspect = shortSide > 0 ? height / shortSide : 1.1f;
+        if (aspect <= 1.4f) {
+            return 0.50f;
+        }
+        return Math.max(0.42f, 0.50f - (aspect - 1.4f) * 0.14f);
+    }
+
+    /** 引文块可用高度：屏高减去上留白和底部给时钟留的位置 */
+    private float quoteRoomHeight() {
+        int height = rootView != null && rootView.getHeight() > 0
+                ? rootView.getHeight() : getResources().getDisplayMetrics().heightPixels;
+        return Math.max(120f, height - shortSide * 0.06f - quoteBottomPad);
     }
 
     /** 引文可用宽度，留 3% 余量：自己量出来的行宽只要比 TextView 内部换行宽半点，就会又冒出一个孤字 */
     private float quoteWidth() {
-        int width = rootView != null && rootView.getWidth() > 0
-                ? rootView.getWidth() : getResources().getDisplayMetrics().widthPixels;
-        int padding = quoteLayout.getPaddingLeft() + quoteLayout.getPaddingRight();
-        return Math.max(60f, (width - padding) * 0.97f);
+        // 优先用引文视图的实测宽度：横竖屏重建时 displayMetrics 可能还是旧值，
+        // 按旧宽度装行会让每一行都短一截，右半边空着（横屏「右边特别空」就是这个原因）
+        int width = quoteView != null ? quoteView.getWidth() : 0;
+        if (width <= 0) {
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int padding = (int) (screenWidth * (landscape ? 0.075f : 0.062f));
+            width = screenWidth - 2 * padding;
+        }
+        return Math.max(60f, width * 0.97f);
     }
 
     /**
      * 按「句读」断行：优先在逗号、句号处换行，让每行都以标点收尾，凑不成整句时再退一步做均衡分配，
      * 保证末行不会只剩一两个字（诗的二、三句话各自成行）。
      */
-    private Laid layoutQuote(String source, float size) {
+    private Laid layoutQuote(String source, float size, boolean book) {
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         Typeface typeface = quoteView.getTypeface();
         if (typeface != null) {
@@ -606,7 +667,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i <= source.length(); i++) {
             if (i == source.length() || source.charAt(i) == '\n') {
                 if (i > from) {
-                    appendParagraph(display, map, source.substring(from, i), from, paint, size, avail);
+                    appendParagraph(display, map, source.substring(from, i), from, paint, size, avail, book);
                 }
                 from = i + 1;
             }
@@ -639,7 +700,7 @@ public class MainActivity extends Activity {
     private static final double WIDOW_PENALTY = 60.0;
 
     private void appendParagraph(StringBuilder display, List<Integer> map, String paragraph, int offset,
-                                 Paint paint, float size, float avail) {
+                                 Paint paint, float size, float avail, boolean book) {
         List<String> clusters = new ArrayList<>();
         List<Integer> starts = new ArrayList<>();
         clusterize(paragraph, offset, clusters, starts);
@@ -656,6 +717,25 @@ public class MainActivity extends Activity {
             clauseEnd[i] = CLOSE_PUNCT.indexOf(cluster.charAt(cluster.length() - 1)) >= 0;
         }
         double limit = avail / size;
+        if (book) {
+            // 书本式：首行缩进两字、每行铺满到右边距、行尾自然收，读起来像一整段文字
+            boolean indent = display.length() == 0;
+            int[] lines = packBook(widths, limit, indent ? limit - 2 : limit);
+            if (lines.length > 1) {
+                for (double factor = 0.99; factor >= 0.86; factor -= 0.01) {
+                    int[] candidate = packBook(widths, limit * factor, indent ? limit * factor - 2 : limit * factor);
+                    if (candidate.length != lines.length) {
+                        continue;
+                    }
+                    if (totalUnits(widths, candidate[candidate.length - 2], count) >= 3) {
+                        lines = candidate;
+                        break;
+                    }
+                }
+            }
+            emitLines(display, map, clusters, starts, lines);
+            return;
+        }
         int base = greedyLineCount(widths, limit);
         int maxLines = paragraph.length() <= 40 ? base + 1 : base;
         int[] breaks = null;
@@ -675,6 +755,11 @@ public class MainActivity extends Activity {
         if (breaks == null) {
             breaks = packWidths(widths, limit);
         }
+        emitLines(display, map, clusters, starts, breaks);
+    }
+
+    private static void emitLines(StringBuilder display, List<Integer> map, List<String> clusters,
+                                  List<Integer> starts, int[] breaks) {
         int start = 0;
         for (int line = 0; line < breaks.length; line++) {
             int end = breaks[line];
@@ -682,16 +767,25 @@ public class MainActivity extends Activity {
                 display.append('\n');
                 map.add(-1);
             }
+
             for (int i = start; i < end; i++) {
                 String cluster = clusters.get(i);
-                int base0 = starts.get(i);
+                int base = starts.get(i);
                 for (int k = 0; k < cluster.length(); k++) {
                     display.append(cluster.charAt(k));
-                    map.add(base0 + k);
+                    map.add(base + k);
                 }
             }
             start = end;
         }
+    }
+
+    private static double totalUnits(double[] widths, int from, int to) {
+        double total = 0;
+        for (int i = Math.max(0, from); i < to; i++) {
+            total += widths[i];
+        }
+        return total;
     }
 
     /**
@@ -819,6 +913,27 @@ public class MainActivity extends Activity {
         return lines;
     }
 
+    /** 书本式装行：首行给缩进留出两字，其余行铺满 */
+    private static int[] packBook(double[] widths, double limit, double firstLimit) {
+        List<Integer> breaks = new ArrayList<>();
+        double current = 0;
+        double lineLimit = firstLimit;
+        for (int i = 0; i < widths.length; i++) {
+            if (current > 0 && current + widths[i] > lineLimit) {
+                breaks.add(i);
+                current = 0;
+                lineLimit = limit;
+            }
+            current += widths[i];
+        }
+        breaks.add(widths.length);
+        int[] result = new int[breaks.size()];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = breaks.get(i);
+        }
+        return result;
+    }
+
     /** 兜底：整行装满就换行，返回每行结束处的单元下标 */
     private static int[] packWidths(double[] widths, double limit) {
         List<Integer> breaks = new ArrayList<>();
@@ -839,10 +954,12 @@ public class MainActivity extends Activity {
     }
 
     private void applyQuoteText(float size) {
-        applyLaid(layoutQuote(quoteText, size));
+        applyLaid(layoutQuote(quoteText, size, bookMode));
     }
 
     private void applyLaid(Laid laid) {
+        // 长句按书本排：左对齐；短诗按句读居中
+        quoteView.setGravity(bookMode ? Gravity.LEFT : Gravity.CENTER);
         SpannableString spannable = new SpannableString(laid.text);
         if (highlight != null && !highlight.isEmpty()) {
             int start = quoteText.indexOf(highlight);
@@ -865,7 +982,48 @@ public class MainActivity extends Activity {
                 if (spanStart >= 0 && spanEnd > spanStart) {
                     spannable.setSpan(new ForegroundColorSpan(palette.highlight),
                             spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    if (palette.boldHighlight) {
+                        // 黑白墨水屏没有颜色可用，时间短语改用加粗来突出
+                        spannable.setSpan(new android.text.style.StyleSpan(Typeface.BOLD),
+                                spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
                 }
+            }
+        }
+        if (bookMode && spannable.length() > 0) {
+            float size = quoteView.getTextSize();
+            int firstBreak = laid.text.indexOf('\n');
+            int firstEnd = firstBreak < 0 ? spannable.length() : firstBreak;
+            // 首行缩进两字：用段落前导边距，不依赖字体里的全角空格字形
+            if (firstEnd > 0) {
+                spannable.setSpan(new android.text.style.LeadingMarginSpan.Standard(
+                                (int) (size * 2f), 0), 0, firstEnd,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            if (quoteView.getTypeface() != null) {
+                paint.setTypeface(quoteView.getTypeface());
+            }
+            paint.setTextSize(quoteView.getTextSize());
+            float target = quoteWidth();
+            float indent = size * 2f;
+            int from = 0;
+            while (from < laid.text.length()) {
+                int to = laid.text.indexOf('\n', from);
+                boolean last = to < 0;
+                if (last) {
+                    to = laid.text.length();
+                }
+                float width = paint.measureText(laid.text, from, to);
+                float lineTarget = from == 0 ? target - indent : target;
+                if (!last && width > 0f && width < lineTarget) {
+                    float scale = Math.min(1.06f, lineTarget / width);
+                    if (scale > 1.005f) {
+                        spannable.setSpan(new ScaleXSpan(scale), from, to,
+                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                }
+                from = to + 1;
             }
         }
         quoteView.setText(spannable);
