@@ -675,8 +675,8 @@ public class MainActivity extends Activity {
                 clause = 0;
             } else {
                 clause++;
-                // 一句里带长从句（>10 字）的是散文/小说句子，按诗居中排会跨字断行
-                if (clause > 10) {
+                // 一句里带长从句（>8 字）的是散文/小说句子，按诗居中排会跨字断行
+                if (clause > 8) {
                     return true;
                 }
             }
@@ -764,9 +764,12 @@ public class MainActivity extends Activity {
         return Math.max(60f, width);
     }
 
-    /** 装行宽度：留出 10% 给横向拉伸，保证「拉伸后也不会超出视图宽度」而再换一次行 */
+    /**
+     * 装行宽度：书页模式留 6% 给两端对齐的拉伸（拉伸上限 1.06 × 0.94 = 0.996 ≤ 视图宽度，
+     * 不会二次换行）；诗模式不做拉伸，直接铺到 98.5%，免得把词拆成两行。
+     */
     private float quotePackWidth() {
-        return quoteViewWidth() * 0.90f;
+        return quoteViewWidth() * (bookMode ? 0.94f : 0.985f);
     }
 
     /** 拉伸目标：几乎贴到右边距，这样每行右端整齐 */
@@ -1151,7 +1154,7 @@ public class MainActivity extends Activity {
                 float lineTarget = from == 0 ? target - indent : target;
                 if (!last && width > 0f && width < lineTarget) {
                     // 每行结尾通常差不到一个字，靠横向拉伸补满（上限 10%），右端才会齐
-                    float scale = Math.min(1.10f, lineTarget / width);
+                    float scale = Math.min(1.06f, lineTarget / width);
                     if (scale > 1.005f) {
                         spannable.setSpan(new ScaleXSpan(scale), from, to,
                                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
