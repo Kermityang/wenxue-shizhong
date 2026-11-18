@@ -765,11 +765,11 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 装行宽度：书页模式留 6% 给两端对齐的拉伸（拉伸上限 1.06 × 0.94 = 0.996 ≤ 视图宽度，
-     * 不会二次换行）；诗模式不做拉伸，直接铺到 98.5%，免得把词拆成两行。
+     * 装行宽度：两种模式都按 98.5% 断行。书页模式随后用横向拉伸把「差那一两个字」的空隙
+     * 补满，而拉伸目标也是 98.5%（< 视图宽度），所以再大的拉伸也不会溢出、不会二次换行。
      */
     private float quotePackWidth() {
-        return quoteViewWidth() * (bookMode ? 0.94f : 0.985f);
+        return quoteViewWidth() * 0.985f;
     }
 
     /** 拉伸目标：几乎贴到右边距，这样每行右端整齐 */
@@ -1154,7 +1154,7 @@ public class MainActivity extends Activity {
                 float lineTarget = from == 0 ? target - indent : target;
                 if (!last && width > 0f && width < lineTarget) {
                     // 每行结尾通常差不到一个字，靠横向拉伸补满（上限 10%），右端才会齐
-                    float scale = Math.min(1.06f, lineTarget / width);
+                    float scale = Math.min(1.10f, lineTarget / width);
                     if (scale > 1.005f) {
                         spannable.setSpan(new ScaleXSpan(scale), from, to,
                                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
