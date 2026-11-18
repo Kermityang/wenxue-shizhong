@@ -42,6 +42,8 @@ fi
   --manifest "$APP/AndroidManifest.xml" \
   -A "$OUT/assets" -0 ttf \
   --min-sdk-version 26 --target-sdk-version 29 --auto-add-overlay \
+  ${CLOCK_VERSION_CODE:+--version-code "$CLOCK_VERSION_CODE"} \
+  ${CLOCK_VERSION_NAME:+--version-name "$CLOCK_VERSION_NAME"} \
   "$OUT/res.zip"
 
 echo "[4/5] pack dex + align"

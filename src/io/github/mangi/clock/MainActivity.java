@@ -44,7 +44,7 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final String[][] LINES = {
-            {"他接到庄园的电话，\n是在一点零六分。\n窗外的雪，停了。", "P.D. 詹姆斯　《圣诞老人之死》"},
+            {"人闲桂花落，\n夜静春山空。", "王维　《鸟鸣涧》"},
             {"夜半钟声到客船。", "张继　《枫桥夜泊》"},
             {"月上柳梢头，\n人约黄昏后。", "欧阳修　《生查子》"}
     };
@@ -629,6 +629,12 @@ public class MainActivity extends Activity {
         float room = quoteRoomHeight();
         indentMode = bookMode;
         Laid laid = layoutQuote(quoteText, quoteSize, bookMode, indentMode);
+        if (laid.lines <= 1) {
+            // 只有一行时行距 1.75 会在句子下方留出大半行空白，出处被顶得很远；压到 1.15
+            mult = 1.15f;
+            quoteLineMult = mult;
+            quoteView.setLineSpacing(0f, mult);
+        }
         while (estimateHeight(laid.lines, quoteSize, mult) > room && quoteSize > baseQuoteSize * 0.72f) {
             quoteSize *= 0.92f;
             quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
@@ -783,7 +789,9 @@ public class MainActivity extends Activity {
     private static final String[] NOVELS = {"水浒", "西游记", "三国演义", "红楼梦", "儒林外史", "金瓶梅",
             "聊斋", "说岳", "镜花缘", "封神演义", "儿女英雄传", "老残游记", "官场现形记", "二十年目睹",
             "三侠五义", "醒世恒言", "喻世明言", "警世通言", "初刻拍案惊奇", "二刻拍案惊奇", "拍案惊奇",
-            "东周列国", "隋唐演义", "说唐", "济公", "阅微草堂", "子不语", "夜雨秋灯"};
+            "东周列国", "隋唐演义", "说唐", "济公", "阅微草堂", "子不语", "夜雨秋灯",
+            "倚天屠龙记", "神雕侠侣", "射雕英雄传", "天龙八部", "笑傲江湖", "鹿鼎记", "连城诀",
+            "碧血剑", "侠客行", "雪山飞狐", "飞狐外传", "书剑恩仇录", "白马啸西风"};
 
     /** 宋人笔记、史志、风土记：叙事体，按书页排 */
     private static final String[] NOTES = {"梦粱录", "东京梦华录", "武林旧事", "东坡志林", "老学庵笔记",
@@ -841,8 +849,38 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    /** 史书、诸子、散文：即使句子短也按书页排 */
+    private static final String[] PROSE = {"史记", "汉书", "后汉书", "三国志", "资治通鉴", "左传", "国语",
+            "战国策", "孟子", "庄子", "荀子", "韩非", "墨子", "老子", "论语", "礼记", "周易", "尚书",
+            "醉翁亭记", "水经注", "世说新语", "梦溪笔谈", "东坡志林"};
+
+    private static boolean isProseSource(String source) {
+        if (source == null) {
+            return false;
+        }
+        for (String p : PROSE) {
+            if (source.contains(p)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isBookText(String text, String source) {
         if (text == null) {
+            return false;
+        }
+        // 歌词、短诗：整句不超过 14 字、最多一个逗号，且出处不是小说/史书/散文 —— 按诗排（居中、不缩进）。
+        // 否则「此刻夜深晚风不再。」这种八言歌词会被当成散文，顶格加首行缩进。
+        String trimmed = text.trim();
+        int commas = 0;
+        for (int i = 0; i < trimmed.length(); i++) {
+            if (trimmed.charAt(i) == '，') {
+                commas++;
+            }
+        }
+        if (!isNovelSource(source) && !isNotesSource(source) && !isProseSource(source)
+                && trimmed.length() <= 14 && commas <= 1) {
             return false;
         }
         if (isNovelSource(source) || isNotesSource(source)) {
@@ -1057,6 +1095,24 @@ public class MainActivity extends Activity {
             int[] lines = packBookHang(widths, starts, clusters, limit, firstLimit, 1.0);
             emitLines(display, map, clusters, starts, lines);
             return;
+        }
+        // 一句话里有且只有一个逗号（「是二更鼓了，冬冬二鼓。」这类）：两句各占一行，
+        // 不要按宽度从中间劈开，否则会出现「冬冬二 / 鼓。」这种断法
+        int commas = 0;
+        int commaBreak = -1;
+        for (int i = 0; i < count; i++) {
+            if (clusters.get(i).endsWith("，")) {
+                commas++;
+                commaBreak = i + 1;
+            }
+        }
+        if (commas == 1 && commaBreak > 0 && commaBreak < count) {
+            double left = totalUnits(widths, 0, commaBreak);
+            double right = totalUnits(widths, commaBreak, count);
+            if (left <= limit + 0.05 && right <= limit + 0.05) {
+                emitLines(display, map, clusters, starts, new int[]{commaBreak, count});
+                return;
+            }
         }
         double firstLimit = limit;
         int base = greedyLineCount(widths, limit);
