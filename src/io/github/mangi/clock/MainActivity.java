@@ -130,6 +130,10 @@ public class MainActivity extends Activity {
     private int shrinkSteps = 0;
     private float quoteLineMult = 1.75f;
     private float currentQuoteSize = 60f;
+    private String usedDate = "";
+    private final java.util.Set<String> usedToday = new java.util.HashSet<>();
+    private String lastMinuteKey = "";
+    private Entry lastChoice;
     private boolean adjusting = false;
     private boolean bookMode = false;
     private boolean indentMode = false;
@@ -468,40 +472,115 @@ public class MainActivity extends Activity {
         int hour = calendar.get(Calendar.HOUR_OF_DAY);
         int minute = calendar.get(Calendar.MINUTE);
         String key = String.format(Locale.US, "%02d:%02d", hour, minute);
+        loadUsed(calendar);
+        // 同一分钟内重复渲染（换配色、回前台）不再重新抽句子，避免白白消耗候选
+        if (key.equals(lastMinuteKey) && lastChoice != null) {
+            return lastChoice;
+        }
+        Entry chosen = null;
         List<Entry> exact = byTime.get(key);
         if (exact != null && !exact.isEmpty()) {
-            // 同一条时间有多个出处时，按日期轮换，每天读到的不是同一句
-            return exact.get(calendar.get(Calendar.DAY_OF_MONTH) % exact.size());
-        }
-        // 这一分钟语料里没有对应段落（正常不会发生）：只往前找最近的一条，绝不倒退到已经过去的时刻，
-        // 也不和上一分钟重复，否则到点翻页会翻出一模一样的文字
-        int nowMin = hour * 60 + minute;
-        int bestDist = Integer.MAX_VALUE;
-        int secondDist = Integer.MAX_VALUE;
-        Entry best = null;
-        Entry second = null;
-        for (Entry entry : entries) {
-            try {
-                int t = Integer.parseInt(entry.time.substring(0, 2)) * 60
-                        + Integer.parseInt(entry.time.substring(3, 5));
-                int d = ((t - nowMin) % 1440 + 1440) % 1440;
-                if (d < bestDist) {
-                    secondDist = bestDist;
-                    second = best;
-                    bestDist = d;
-                    best = entry;
-                } else if (d < secondDist) {
-                    secondDist = d;
-                    second = entry;
+            int size = exact.size();
+            int start = calendar.get(Calendar.DAY_OF_MONTH) % size;
+            for (int k = 0; k < size; k++) {
+                Entry candidate = exact.get((start + k) % size);
+                if (!usedToday.contains(candidate.s)) {
+                    chosen = candidate;
+                    break;
                 }
-            } catch (Throwable ignored) {
+            }
+            if (chosen == null) {
+                // 这个分钟位的候选今天都用过了：只在「附近 8 分钟内」借一条没用过的句子，
+                // 免得为了去重把 20:00 的句子换成 18:30 的，时间就对不上了
+                int nowMinute = hour * 60 + minute;
+                Entry borrowed = nearestUnused(nowMinute);
+                if (borrowed != null && minuteDistance(borrowed, nowMinute) <= 8) {
+                    chosen = borrowed;
+                }
+                if (chosen == null) {
+                    chosen = exact.get(start);
+                }
+            }
+        } else {
+            // 这一分钟没有语料（正常不会发生）：往前找最近的，优先今天没用过的
+            chosen = nearestUnused(hour * 60 + minute);
+            if (chosen == null) {
+                chosen = nearestAny(hour * 60 + minute);
             }
         }
-        if (shown != null && best != null && isSame(best, shown) && second != null) {
-            return second;
+        if (chosen != null) {
+            lastMinuteKey = key;
+            lastChoice = chosen;
+            if (usedToday.add(chosen.s)) {
+                java.util.HashSet<String> copy = new java.util.HashSet<>(usedToday);
+                preferences.edit().putStringSet("used_today", copy).apply();
+            }
+        }
+        return chosen;
+    }
+
+    /** 就近找一条今天还没出现过的句子（按时间距离，绝不倒退到已过去的时刻太远） */
+    private Entry nearestUnused(int nowMin) {
+        Entry best = null;
+        int bestDist = Integer.MAX_VALUE;
+        for (Entry entry : entries) {
+            if (usedToday.contains(entry.s)) {
+                continue;
+            }
+            int dist = minuteDistance(entry, nowMin);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = entry;
+            }
         }
         return best;
     }
+
+    private Entry nearestAny(int nowMin) {
+        Entry best = null;
+        int bestDist = Integer.MAX_VALUE;
+        for (Entry entry : entries) {
+            int dist = minuteDistance(entry, nowMin);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = entry;
+            }
+        }
+        return best;
+    }
+
+    private static int minuteDistance(Entry entry, int nowMin) {
+        try {
+            int t = Integer.parseInt(entry.time.substring(0, 2)) * 60
+                    + Integer.parseInt(entry.time.substring(3, 5));
+            return ((t - nowMin) % 1440 + 1440) % 1440;
+        } catch (Throwable ignored) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    /** 读取「今天已经展示过的句子」；跨日自动清空 */
+    private void loadUsed(Calendar calendar) {
+        String today = String.format(Locale.US, "%04d-%02d-%02d",
+                calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1,
+                calendar.get(Calendar.DAY_OF_MONTH));
+        if (today.equals(usedDate)) {
+            return;
+        }
+        String savedDate = preferences.getString("used_date", "");
+        usedToday.clear();
+        if (today.equals(savedDate)) {
+            java.util.Set<String> saved = preferences.getStringSet("used_today", null);
+            if (saved != null) {
+                usedToday.addAll(saved);
+            }
+        } else {
+            preferences.edit().putString("used_date", today)
+                    .putStringSet("used_today", new java.util.HashSet<String>()).apply();
+        }
+        usedDate = today;
+    }
+
 
     private static boolean isSame(Entry a, Entry b) {
         return a.time.equals(b.time) && a.s.equals(b.s) && a.b.equals(b.b);
