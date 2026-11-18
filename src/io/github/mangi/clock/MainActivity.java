@@ -684,7 +684,33 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        return sentences >= 2 && text.length() > 24;
+        if (sentences >= 2 && text.length() > 24) {
+            return true;
+        }
+        // 三个以上从句、总长 24 字往上、每个从句都不长（≤8 字）：多从句的叙事句，
+        // 例如「十三点零五分，阿莱恩打开外门，在石阶边磕净烟斗，随后仍站在那里…」，
+        // 按诗排会把一句话拆成一行行，看着像诗其实是小说。
+        int clauses = 0;
+        int longest = 0;
+        int current = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '，' || c == '。' || c == '；' || c == '：' || c == '！' || c == '？'
+                    || c == '、' || c == '…') {
+                if (current > 0) {
+                    clauses++;
+                    longest = Math.max(longest, current);
+                    current = 0;
+                }
+            } else {
+                current++;
+            }
+        }
+        if (current > 0) {
+            clauses++;
+            longest = Math.max(longest, current);
+        }
+        return clauses >= 3 && text.length() >= 24 && longest <= 8;
     }
 
     private float bookMargin() {
