@@ -473,9 +473,18 @@ public class MainActivity extends Activity {
         int minute = calendar.get(Calendar.MINUTE);
         String key = String.format(Locale.US, "%02d:%02d", hour, minute);
         loadUsed(calendar);
-        // 同一分钟内重复渲染（换配色、回前台）不再重新抽句子，避免白白消耗候选
-        if (key.equals(lastMinuteKey) && lastChoice != null) {
-            return lastChoice;
+        // 同一分钟内重新渲染（旋转、换配色、回前台、进程重建）都复用同一句，绝不换句
+        String savedMinute = preferences.getString("pick_minute", "");
+        if (key.equals(savedMinute)) {
+            String savedText = preferences.getString("pick_sentence", "");
+            List<Entry> bucket = byTime.get(key);
+            if (bucket != null) {
+                for (Entry entry : bucket) {
+                    if (entry.s.equals(savedText)) {
+                        return entry;
+                    }
+                }
+            }
         }
         Entry chosen = null;
         List<Entry> exact = byTime.get(key);
@@ -490,27 +499,17 @@ public class MainActivity extends Activity {
                 }
             }
             if (chosen == null) {
-                // 这个分钟位的候选今天都用过了：只在「附近 8 分钟内」借一条没用过的句子，
-                // 免得为了去重把 20:00 的句子换成 18:30 的，时间就对不上了
-                int nowMinute = hour * 60 + minute;
-                Entry borrowed = nearestUnused(nowMinute);
-                if (borrowed != null && minuteDistance(borrowed, nowMinute) <= 8) {
-                    chosen = borrowed;
-                }
-                if (chosen == null) {
-                    chosen = exact.get(start);
-                }
+                // 候选今天都用过了：宁可重复本分钟的这一句，也绝不跨分钟借——
+                // 每句都自带时间词，借来的句子会和屏幕上的时间对不上
+                chosen = exact.get(start);
             }
         } else {
-            // 这一分钟没有语料（正常不会发生）：往前找最近的，优先今天没用过的
-            chosen = nearestUnused(hour * 60 + minute);
-            if (chosen == null) {
-                chosen = nearestAny(hour * 60 + minute);
-            }
+            // 这一分钟没有语料（正常不会发生）：只取时间最近的句子
+            chosen = nearestAny(hour * 60 + minute);
         }
         if (chosen != null) {
-            lastMinuteKey = key;
-            lastChoice = chosen;
+            preferences.edit().putString("pick_minute", key)
+                    .putString("pick_sentence", chosen.s).apply();
             if (usedToday.add(chosen.s)) {
                 java.util.HashSet<String> copy = new java.util.HashSet<>(usedToday);
                 preferences.edit().putStringSet("used_today", copy).apply();
