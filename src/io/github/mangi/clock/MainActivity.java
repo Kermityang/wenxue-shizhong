@@ -127,6 +127,7 @@ public class MainActivity extends Activity {
     private String quoteText = "";
     private float baseQuoteSize = 40f;
     private float quoteScale = 1f;
+    private int shrinkSteps = 0;
     private boolean adjusting = false;
     private boolean bookMode = false;
     private boolean indentMode = false;
@@ -213,16 +214,33 @@ public class MainActivity extends Activity {
             quoteLayout.setOrientation(LinearLayout.VERTICAL);
             quoteLayout.setGravity(Gravity.CENTER_HORIZONTAL);
             quoteLayout.setCameraDistance(12000 * getResources().getDisplayMetrics().density);
+            quoteLayout.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                @Override
+                public void onLayoutChange(View view, int left, int top, int right, int bottom,
+                                           int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                    int blockHeight = bottom - top;
+                    int height = screenHeightPx > 0 ? screenHeightPx : 0;
+                    if (blockHeight <= 0 || height <= 0 || shrinkSteps >= 3) {
+                        return;
+                    }
+                    int band = height - quoteTopPad - quoteBottomPad;
+                    if (blockHeight > band) {
+                        shrinkSteps++;
+                        float size = quoteView.getTextSize() * 0.92f;
+                        quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
+                        applyQuoteText(size);
+                    }
+                }
+            });
             int sidePadding = (int) (screenWidth * (landscape ? 0.075f : 0.062f));
             quoteLayout.setPadding(sidePadding, 0, sidePadding, 0);
 
             // 引文块放进铺满全屏的容器：底部固定给时钟留位，gravity=CENTER 由框架居中。
             // 目标中心 = 屏高 × quoteCenterRatio()，上边距按它反推（方屏 50%，长直板约 42%）。
             quoteContainer = new FrameLayout(this);
-            quoteBottomPad = (int) (shortSide * (landscape ? 0.20f : 0.264f));
-            quoteTopPad = (int) Math.max(0f,
-                    2f * screenHeight * quoteCenterRatio() - screenHeight + quoteBottomPad);
-            quoteContainer.setPadding(0, quoteTopPad, 0, quoteBottomPad);
+            // 给时钟留的高度先按估算给个初值，布局出来后用实测的时钟块高度校正
+            quoteBottomPad = (int) (shortSide * 0.264f);
+            applyQuoteInsets();
             quoteContainer.addView(quoteLayout, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
@@ -276,6 +294,22 @@ public class MainActivity extends Activity {
             clockParams.rightMargin = (int) (shortSide * 0.067f);
             clockParams.bottomMargin = (int) (shortSide * 0.097f);
             rootView.addView(clockLayout, clockParams);
+            clockLayout.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                @Override
+                public void onLayoutChange(View view, int left, int top, int right, int bottom,
+                                           int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                    int rootHeight = rootView != null ? rootView.getHeight() : 0;
+                    if (rootHeight <= 0 || clockLayout.getTop() <= 0) {
+                        return;
+                    }
+                    // 预留 = 屏底到时钟块顶的高度 + 一点空隙，横竖屏都用真实值
+                    int reserve = rootHeight - clockLayout.getTop() + (int) (shortSide * 0.022f);
+                    if (Math.abs(reserve - quoteBottomPad) > 2) {
+                        quoteBottomPad = reserve;
+                        applyQuoteInsets();
+                    }
+                }
+            });
 
             timeView = new TextView(this);
             timeView.setTypeface(wenKai);
@@ -503,6 +537,7 @@ public class MainActivity extends Activity {
         quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, quoteSize);
         baseQuoteSize = quoteSize;
         quoteScale = 1f;
+        shrinkSteps = 0;
         // 块太高就逐档缩字号，保证整块落在「时钟上方」那块地里
         float room = quoteRoomHeight();
         indentMode = bookMode;
@@ -567,6 +602,17 @@ public class MainActivity extends Activity {
     private static final String CLOSE_PUNCT = "，。、；：？！）】》」』”’…—·,.!?;:%)]}";
     /** 不许留在行尾的起首标点 */
     private static final String OPEN_PUNCT = "（【《「『“‘([{";
+
+    /** 按「目标中心」和「给时钟预留的高度」算出容器上下留白 */
+    private void applyQuoteInsets() {
+        if (quoteContainer == null || shortSide <= 0f) {
+            return;
+        }
+        int height = screenHeightPx > 0 ? screenHeightPx
+                : getResources().getDisplayMetrics().heightPixels;
+        quoteTopPad = (int) Math.max(0f, 2f * height * quoteCenterRatio() - height + quoteBottomPad);
+        quoteContainer.setPadding(0, quoteTopPad, 0, quoteBottomPad);
+    }
 
     /** 出处排版：太长就缩字号，缩到 0.7 倍仍放不下就在书名号/括号处折成两行，避免被屏幕切掉 */
     private void layOutSource(String raw) {
@@ -682,7 +728,7 @@ public class MainActivity extends Activity {
     private float quoteRoomHeight() {
         int height = rootView != null && rootView.getHeight() > 0
                 ? rootView.getHeight() : getResources().getDisplayMetrics().heightPixels;
-        return Math.max(120f, height - shortSide * 0.06f - quoteBottomPad);
+        return Math.max(120f, height - quoteTopPad - quoteBottomPad);
     }
 
     /** 引文可用宽度，留 3% 余量：自己量出来的行宽只要比 TextView 内部换行宽半点，就会又冒出一个孤字 */
