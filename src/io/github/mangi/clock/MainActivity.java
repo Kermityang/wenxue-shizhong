@@ -414,6 +414,11 @@ public class MainActivity extends Activity {
             render();
             return;
         }
+        // 墨水屏：刷新本身就有残影、播不了 3D 动画，直接换字
+        if ("ink".equals(preferences.getString("bg", "black"))) {
+            render();
+            return;
+        }
         quoteLayout.setPivotX(quoteLayout.getWidth() / 2f);
         quoteLayout.setPivotY(quoteLayout.getHeight() / 2f);
         quoteLayout.setRotationY(0f);
