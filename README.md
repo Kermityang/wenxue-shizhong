@@ -11,13 +11,13 @@
 
 <img src="docs/screenshot.png" width="360" alt="文学时钟：人类已经走到末路，末日时钟仍在滴答前行。它在二十三点五十六分……——费伊·韦尔登《恶女人》">
 
-## 最新版本 v2.10 · 语料 1808 句
+## 最新版本 v2.12 · 语料 1803 句
 
 > 每分钟都有句子；句中时间词标红，且与钟面上的时间对得上。
 
-| | v2.02 | v2.10 |
+| | v2.02 | v2.12 |
 |---|---|---|
-| 句子总数 | 1495 | **1808** |
+| 句子总数 | 1495 | **1803** |
 | 覆盖分钟 | 1440 / 1440 | 1440 / 1440 |
 | 字体缺字 | 356 | **0** |
 | 钟点与句子不符 | — | **0** |
@@ -30,7 +30,7 @@
   单行行距收紧，引文与出处不再被拉开
 - **字体子集按语料重切**：3281 字形，缺字 0
 
-下载：[Releases → v2.10](..\/..\/releases\/tag\/v2.10)（`clock-2.10.apk`，完整包）
+下载：[Releases → v2.12](..\/..\/releases\/tag\/v2.12)（`clock-2.12.apk`，完整包）
 
 ## 特性
 
@@ -51,18 +51,30 @@
 
 桌面图标是一个细线钟面。点开即全屏显示；**点一下**退出，**上滑**进设置。
 
-> Actions 里自动构建出的 artifact（约 50KB）**不带字体**，用途只是验证代码能否编译；正式分发请用 Release 的完整包。
+> Actions 里自动构建出的 artifact 用的是**每次 CI 现生成的临时证书**，它只是编译体检的产物——别拿来安装或转发（换证书就没法覆盖升级了）；正式分发请用 Release 的包。
 
 ## 构建
 
-需要 JDK 11+、Android SDK（build-tools + platform android-34）和 `r8.jar`。
+需要 JDK 11+、Android SDK（build-tools + platform）。`r8.jar` 不是必需的——build-tools 自带的 `d8` 就够。
 
 ```sh
-export ANDROID_HOME=/path/to/android-sdk
+export ANDROID_SDK_ROOT=/path/to/android-sdk
 ./build.sh          # 产物：clock.apk
 ```
 
-脚本用到的环境变量：`ANDROID_JAR`、`BUILD_TOOLS`、`R8`、`KEYSTORE`、`STORE_PASS`、`KEY_PASS`、`KEY_ALIAS`，默认值见 `build.sh` 开头。CI 配置在 `.github/workflows/build.yml`：每次 push 自动构建 APK，**只作构建体检**（artifact 用临时证书签名、不含字体，不是发布包）。CI 不发布任何东西——Release 里的包由维护者用固定证书在本机构建后上传。
+**脚本不写死路径**，所以本地和 CI 用同一份：
+
+- 源码目录 `APP` 取脚本自身所在目录
+- 构建工具按顺序找：`CLOCK_BUILD_TOOLS` → `/opt/asdk/ast/build-tools`（维护者本机）→ `$ANDROID_SDK_ROOT/build-tools/` 里最新的一版
+- `android.jar` 同理：`CLOCK_ANDROID_JAR` → `/opt/asdk/pf/android-34/android.jar` → `$ANDROID_SDK_ROOT/platforms/android-*/` 里最新的
+- d8 优先用 build-tools 自带的 `d8` 可执行文件；没有才退回 `CLOCK_R8_JAR`（默认 `/workspace/tools/r8.jar`）里的 r8
+- 找不到工具链会直接报错退出
+
+可用环境变量：`CLOCK_CORPUS`（换成自己的语料文件，会连带重切字体子集）、`CLOCK_VERSION_CODE`、`CLOCK_VERSION_NAME`、`CLOCK_BUILD_TOOLS`、`CLOCK_ANDROID_JAR`、`CLOCK_R8_JAR`。签名固定用脚本同目录的 `release.jks`（别名 `clock`，口令见下），这三项在 `build.sh` 末尾写死，没有做成变量。
+
+`assets/LXGWWenKai-Light.ttf` 是霞鹜文楷的子集，仓库里附带，所以打出来的包自带字体。重切子集需要 `fontTools`（`pip install fonttools`）；没装的话这一步会跳过，直接用仓库里现成的子集。
+
+CI 配置在 `.github/workflows/build.yml`：push 到 main 或打 tag 都会跑一遍 `./build.sh`，**只作构建体检**——artifact 用临时证书签名，不是发布包。CI 不发布任何东西：Release 里的包由维护者在本地用固定证书构建后手动上传（换证书就无法覆盖升级，这一点比省事重要）。
 
 ### 签名
 
@@ -106,7 +118,7 @@ sh tools/make_subset.sh /path/to/LXGWWenKai-Light.ttf
 - `h`：要标红的时间短语（必须是 `s` 的子串）
 - `b`：出处，写成 `作者　《书名》`
 
-**仓库里的语料全部是公有领域作品**：**1808 句**，覆盖 1440/1440 分钟。取材自
+**仓库里的语料全部是公有领域作品**：**1803 句**，覆盖 1440/1440 分钟。取材自
 诗经、楚辞、先秦诸子、史记汉书、全唐诗、千家诗、宋词三百首、元曲、明清小说（水浒、西游、三国、红楼、
 儒林、聊斋、说岳、金瓶梅）、宋人笔记（东京梦华录、梦粱录、武林旧事、老学庵笔记）、敦煌曲子词，
 以及**清末民初小说**——刘鹗《老残游记》、吴趼人《二十年目睹之怪现状》《九命奇冤》《恨海》、
