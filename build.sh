@@ -114,10 +114,31 @@ PY
 "$BT/zipalign" -f 4 "$OUT/unaligned.apk" "$OUT/aligned.apk"
 
 echo "[5/5] sign"
+# 签名材料不进仓库：keystore 和口令都不提交。
+#   CLOCK_KEYSTORE   keystore 路径；不给就依次找 $APP/release.jks、$APP/../clock-signing/release.jks
+#   CLOCK_STOREPASS  口令；不给就读 keystore 同目录的 signing.env（一行 CLOCK_STOREPASS=xxx）
+KEYSTORE=${CLOCK_KEYSTORE:-}
+if [ -z "$KEYSTORE" ]; then
+  for c in "$APP/release.jks" "$APP/../clock-signing/release.jks"; do
+    if [ -f "$c" ]; then KEYSTORE=$c; break; fi
+  done
+fi
+if [ -z "$KEYSTORE" ] || [ ! -f "$KEYSTORE" ]; then
+  echo "ERROR: 找不到签名 keystore（用 CLOCK_KEYSTORE 指定，或放到 $APP/../clock-signing/release.jks）" >&2
+  exit 1
+fi
+if [ -z "${CLOCK_STOREPASS:-}" ] && [ -f "$(dirname "$KEYSTORE")/signing.env" ]; then
+  . "$(dirname "$KEYSTORE")/signing.env"
+fi
+if [ -z "${CLOCK_STOREPASS:-}" ]; then
+  echo "ERROR: 未提供签名口令（export CLOCK_STOREPASS=…，或写 $(dirname "$KEYSTORE")/signing.env）" >&2
+  exit 1
+fi
+export CLOCK_STOREPASS   # 口令经环境变量交给 jarsigner，不出现在命令行参数里
 SIGNTMP=${TMPDIR:-/tmp}
 cp "$OUT/aligned.apk" "$SIGNTMP/clk_in.apk"
 rm -f "$SIGNTMP/clk_out.apk"
-jarsigner -keystore "$APP/release.jks" -storepass etasign -keypass etasign \
+jarsigner -keystore "$KEYSTORE" -storepass:env CLOCK_STOREPASS \
   -digestalg SHA-256 -sigalg SHA256withRSA \
   -signedjar "$SIGNTMP/clk_out.apk" "$SIGNTMP/clk_in.apk" clock >/dev/null
 cp "$SIGNTMP/clk_out.apk" "$APP/clock.apk"

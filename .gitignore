@@ -21,3 +21,8 @@ __pycache__/
 local/
 local-corpus.json
 full-corpus.json
+
+# 签名材料（绝不入库）
+*.jks
+*.keystore
+signing.env

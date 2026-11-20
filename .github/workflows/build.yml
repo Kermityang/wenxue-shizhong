@@ -31,12 +31,14 @@ jobs:
           ls "$ANDROID_SDK_ROOT/build-tools" || true
           ls "$ANDROID_SDK_ROOT/platforms" || true
 
-      # 仅用于本 artifact（体检产物，无字体、不是发布包）
+      # 仅用于本 artifact（体检产物、不是发布包）：口令现场随机生成，不写进仓库
       - name: 生成临时签名
         run: |
+          PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)
           keytool -genkeypair -keystore release.jks -alias clock \
             -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass etasign -keypass etasign -dname "CN=clock"
+            -storepass "$PASSWORD" -keypass "$PASSWORD" -dname "CN=clock"
+          echo "CLOCK_STOREPASS=$PASSWORD" >> "$GITHUB_ENV"
 
       - name: 构建
         run: |

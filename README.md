@@ -22,7 +22,7 @@
 | 字体缺字 | 0 | **0** |
 | 钟点与句子不符 | 0 | **0** |
 
-### v3.0 新增
+### 本次新增
 
 - **五档**：精准 / 偏准 / 均衡 / 偏意 / 写意。档位决定句子离此刻有多远——精准只出写明了钟点的句子，写意只出时辰与景致。
 - **喜欢 / 屏蔽**：长按钟面上的句子即可加入。喜欢的句子在候选池里权重三倍，并豁免当天去重；屏蔽的不会再出现。两个名单都能随时移除。
@@ -82,7 +82,7 @@ export ANDROID_SDK_ROOT=/path/to/android-sdk
 - d8 优先用 build-tools 自带的 `d8` 可执行文件；没有才退回 `CLOCK_R8_JAR`（默认 `/workspace/tools/r8.jar`）里的 r8
 - 找不到工具链会直接报错退出
 
-可用环境变量：`CLOCK_CORPUS`（换成自己的语料文件，会连带重切字体子集）、`CLOCK_VERSION_CODE`、`CLOCK_VERSION_NAME`、`CLOCK_BUILD_TOOLS`、`CLOCK_ANDROID_JAR`、`CLOCK_R8_JAR`。签名固定用脚本同目录的 `release.jks`（别名 `clock`，口令见下），这三项在 `build.sh` 末尾写死，没有做成变量。
+可用环境变量：`CLOCK_CORPUS`（换成自己的语料文件，会连带重切字体子集）、`CLOCK_VERSION_CODE`、`CLOCK_VERSION_NAME`、`CLOCK_BUILD_TOOLS`、`CLOCK_ANDROID_JAR`、`CLOCK_R8_JAR`。签名用的 keystore 与口令走 `CLOCK_KEYSTORE`、`CLOCK_STOREPASS` 两个变量，见下节「签名」。
 
 `assets/LXGWWenKai-Light.ttf` 是霞鹜文楷的子集，仓库里附带，所以打出来的包自带字体。重切子集需要 `fontTools`（`pip install fonttools`）；没装的话这一步会跳过，直接用仓库里现成的子集。
 
@@ -90,14 +90,22 @@ CI 配置在 `.github/workflows/build.yml`：push 到 main 或打 tag 都会跑�
 
 ### 签名
 
-仓库里**没有**签名文件。自己生成一个：
+仓库里**没有**签名文件，也**没有**口令。自己生成一个（`keytool` 会提示你输入新口令，别照抄别人的）：
 
 ```sh
 keytool -genkeypair -keystore release.jks -alias clock -keyalg RSA -keysize 2048 \
-        -validity 10000 -storepass etasign -keypass etasign -dname "CN=clock"
+        -validity 10000 -dname "CN=clock"
 ```
 
-（`release.jks` 已在 `.gitignore` 里，不会误提交。注意：**换签名后无法覆盖升级**，请自己保管好这个文件。）
+口令不写进脚本、不写进仓库，构建时用两个环境变量给：
+
+```sh
+export CLOCK_KEYSTORE=/path/to/release.jks   # 不给就找 ./release.jks、../clock-signing/release.jks
+export CLOCK_STOREPASS='你的口令'             # 或写进 keystore 同目录的 signing.env
+./build.sh
+```
+
+`signing.env` 只有一行 `CLOCK_STOREPASS=…`，`build.sh` 发现就会自动读。`*.jks`、`*.keystore`、`signing.env` 都在 `.gitignore` 里，不会误提交。注意：**换签名后无法覆盖升级**，请自己保管好这个文件。
 
 ### 字体与子集
 
