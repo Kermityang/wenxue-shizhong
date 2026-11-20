@@ -351,10 +351,13 @@ public class SettingsActivity extends Activity {
                             }
                             if (total == size && sb.toString().equals(sha)) {
                                 java.io.File dst = new java.io.File(dir, id + ".ttf");
-                                if (dst.exists()) {
-                                    dst.delete();
-                                }
                                 ok = tmp.renameTo(dst);
+                                if (!ok && dst.exists() && dst.delete()) {
+                                    ok = tmp.renameTo(dst);
+                                }
+                                if (ok) {
+                                    tmp.delete();
+                                }
                             }
                         } catch (Throwable ignored) {
                         }

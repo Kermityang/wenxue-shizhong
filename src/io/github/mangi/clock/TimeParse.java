@@ -30,7 +30,8 @@ public final class TimeParse {
      * 不含「分」（四点二十分是时间）、不含「刻/半」（三点半是时间）。
      */
     private static final String CLOCK_UNITS =
-            "加仑公里千米米公斤斤克磅英里倍成尺寸丈元角块年岁次个件条张只匹头杯碗盘碟份";
+            "加仑公里千米米公斤斤克磅英里倍成尺寸丈元角块年岁次个件条张只匹头杯碗盘碟份"
+            + "升吨厘毫";
 
     private static final class Candidate {
         String h;
@@ -190,8 +191,16 @@ public final class TimeParse {
             int hour = cn2int(clock.group(1));
             String value = clock.group(2);
             // 「十三点六加仑」这种：点后面紧跟数量单位，且后缀不是明确时分写法，就不是钟点
-            if (clock.end() < text.length()
-                    && CLOCK_UNITS.indexOf(text.charAt(clock.end())) >= 0) {
+            boolean unitFollows = clock.end() < text.length()
+                    && CLOCK_UNITS.indexOf(text.charAt(clock.end())) >= 0;
+            // 「三点二分米」的「分米」是长度单位，不是「二分」；单独判一次
+            if (!unitFollows && clock.end() < text.length()
+                    && text.charAt(clock.end()) == '\u5206'
+                    && clock.end() + 1 < text.length()
+                    && text.charAt(clock.end() + 1) == '\u7c73') {
+                unitFollows = true;
+            }
+            if (unitFollows) {
                 boolean explicitMinute = value != null
                         && (value.endsWith("分") || "半".equals(value) || "半钟".equals(value)
                         || "一刻".equals(value) || "二刻".equals(value) || "三刻".equals(value));

@@ -235,6 +235,9 @@ public class CorpusStore {
             JSONObject root = new JSONObject(text);
             JSONArray array = root.optJSONArray("batches");
             if (array == null) {
+                if (isPrimary) {
+                    corrupted = true;
+                }
                 return null;
             }
             List<Batch> list = new ArrayList<>();
@@ -317,7 +320,7 @@ public class CorpusStore {
     // ────────────────────────── 写 ──────────────────────────
 
     /**
-     * 先写 .tmp、flush + fsync，再把现有文件改名成 .bak，最后把 .tmp 改名成正式文件。
+     * 先写 .tmp、flush + fsync，再把现有文件复制成 .bak，最后把 .tmp 改名成正式文件。
      * 任何一步失败都保持原文件不动。
      */
     private boolean save(List<Batch> batches) {
@@ -358,12 +361,8 @@ public class CorpusStore {
 
             if (target.exists()) {
                 File backup = backupFile();
-                if (backup.exists() && !backup.delete()) {
-                    // 备份删不掉也不阻塞写入，最多留着上一版
-                }
-                if (!target.renameTo(backup)) {
-                    return false;
-                }
+                java.nio.file.Files.copy(target.toPath(), backup.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
             if (!temp.renameTo(target)) {
                 return false;

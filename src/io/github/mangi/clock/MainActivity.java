@@ -210,6 +210,9 @@ public class MainActivity extends Activity {
 
             int screenWidth = getResources().getDisplayMetrics().widthPixels;
             int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            // onLayoutChange 里那道「实测高度超了就缩字号」的兜底要用它；以前从没赋值，
+            // 那里拿到 0 直接 return，等于这道保险一直没生效
+            screenHeightPx = screenHeight;
             landscape = screenWidth > screenHeight;
             int shortSide = Math.min(screenWidth, screenHeight);
             this.shortSide = shortSide;
@@ -350,7 +353,8 @@ public class MainActivity extends Activity {
             dateView.setTextColor(palette.date);
             clockLayout.addView(dateView);
 
-            // 点一下 = 退出时钟；上滑 = 进设置
+            // 点一下 = 退出时钟；朝任意方向滑 = 进设置（纵向 >120px 或横向 >160px）。
+            // 早先只认上滑，后来放宽成任意方向——Kris 2026-11-21 确认这就是想要的行为
             final GestureDetector detector = new GestureDetector(this,
                     new GestureDetector.SimpleOnGestureListener() {
                         @Override
@@ -786,11 +790,15 @@ public class MainActivity extends Activity {
             }
         }
         if (allowed.isEmpty()) {
-            allowed = pool;
+            return null;
         }
-        int nowMinute = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE);
+        long nowMillis = System.currentTimeMillis();
         String lastLiked = preferences.getString("last_liked_s", "");
-        int lastLikedMin = preferences.getInt("last_liked_min", -9999);
+        long lastLikedAt = 0L;
+        try {
+            lastLikedAt = preferences.getLong("last_liked_min", 0L);
+        } catch (ClassCastException ignored) {
+        }
         List<Entry> fresh = new ArrayList<>();
         for (Entry e : allowed) {
             boolean isLiked = liked.contains(e.s);
@@ -798,7 +806,7 @@ public class MainActivity extends Activity {
             if (!isLiked && usedToday.contains(e.s)) {
                 continue;
             }
-            if (isLiked && e.s.equals(lastLiked) && nowMinute - lastLikedMin < 30) {
+            if (isLiked && e.s.equals(lastLiked) && nowMillis - lastLikedAt < 1800000L) {
                 continue;
             }
             fresh.add(e);
@@ -815,15 +823,18 @@ public class MainActivity extends Activity {
         int hour = calendar.get(Calendar.HOUR_OF_DAY);
         int minute = calendar.get(Calendar.MINUTE);
         String key = String.format(Locale.US, "%02d:%02d", hour, minute);
+        String cacheKey = calendar.get(Calendar.DAY_OF_MONTH) + ":" + key;
         loadUsed(calendar);
         level = preferences.getInt("level", 3);
         int savedLevel = preferences.getInt("pick_level", -1);
-        // 同一分钟、同一档位内重新渲染都复用同一句
+        // 同一天、同一分钟、同一档位内重新渲染都复用同一句
         String savedMinute = preferences.getString("pick_minute", "");
-        if (key.equals(savedMinute) && savedLevel == level) {
+        if (cacheKey.equals(savedMinute) && savedLevel == level) {
             String savedText = preferences.getString("pick_sentence", "");
+            java.util.Set<String> blocked = preferences.getStringSet(
+                    "blocked", java.util.Collections.<String>emptySet());
             for (Entry e : entries) {
-                if (e.s.equals(savedText)) {
+                if (e.s.equals(savedText) && !blocked.contains(e.s)) {
                     return e;
                 }
             }
@@ -838,7 +849,7 @@ public class MainActivity extends Activity {
             chosen = nearestAny(hour * 60 + minute);
         }
         if (chosen != null) {
-            preferences.edit().putString("pick_minute", key)
+            preferences.edit().putString("pick_minute", cacheKey)
                     .putString("pick_sentence", chosen.s)
                     .putInt("pick_level", level).apply();
             if (usedToday.add(chosen.s)) {
@@ -849,7 +860,7 @@ public class MainActivity extends Activity {
                     "liked", java.util.Collections.<String>emptySet());
             if (likedNow.contains(chosen.s)) {
                 preferences.edit().putString("last_liked_s", chosen.s)
-                        .putInt("last_liked_min", hour * 60 + minute).apply();
+                        .putLong("last_liked_min", System.currentTimeMillis()).apply();
             }
         }
         return chosen;
@@ -875,7 +886,12 @@ public class MainActivity extends Activity {
     private Entry nearestAny(int nowMin) {
         Entry best = null;
         int bestDist = Integer.MAX_VALUE;
+        java.util.Set<String> blocked = preferences.getStringSet(
+                "blocked", java.util.Collections.<String>emptySet());
         for (Entry entry : entries) {
+            if (blocked.contains(entry.s)) {
+                continue;
+            }
             int dist = minuteDistance(entry, nowMin);
             if (dist < bestDist) {
                 bestDist = dist;
@@ -1441,9 +1457,15 @@ public class MainActivity extends Activity {
             clauseEnd[i] = CLOSE_PUNCT.indexOf(cluster.charAt(cluster.length() - 1)) >= 0;
         }
         double limit = avail / size;
+        // 非书页模式：行尾若是标点，applyLaid 会给整行加 0.9em 的 LeadingMarginSpan，
+        // 但 avail 里没扣这块，会让 TextView 自己再折一次。这里先把预算扣掉。
+        double effectiveLimit = limit;
+        if (!book) {
+            effectiveLimit = Math.max(1.0, limit - 0.95);   // 0.9em 缩进 + 浮点余量
+        }
         // 整句一行放得下就别折 —— 短句拆成两行再漂亮也不如一行。首行宽度要按
         // 是否缩进取，缩进的段落首行更窄，不能拿整行宽度当准
-        double firstAvail = indent ? quoteFirstLineWidth() / size : limit;
+        double firstAvail = book ? (indent ? quoteFirstLineWidth() / size : limit) : effectiveLimit;
         if (totalUnits(widths, 0, count) <= firstAvail - 0.05) {
             emitLines(display, map, clusters, starts, new int[]{count});
             return;
@@ -1460,9 +1482,11 @@ public class MainActivity extends Activity {
         // 短句：先按句读断。书页模式满行装字会把 11 个字切成「收拾端正，已是下 / 午。」，
         // 末行只剩一两个字，比右端不齐难看得多（这是小说的常规处境，必须挡在前面）
         if (count <= 20 && commas == 1 && commaBreak > 0 && commaBreak < count) {
+            double firstLimit = firstAvail;
             double leftUnits = totalUnits(widths, 0, commaBreak);
             double rightUnits = totalUnits(widths, commaBreak, count);
-            if (leftUnits <= limit + 0.05 && rightUnits <= limit + 0.05) {
+            if (leftUnits <= firstLimit + 0.05
+                    && rightUnits <= (book ? limit : effectiveLimit) + 0.05) {
                 emitLines(display, map, clusters, starts, new int[]{commaBreak, count});
                 return;
             }
@@ -1490,19 +1514,19 @@ public class MainActivity extends Activity {
         if (commas == 1 && commaBreak > 0 && commaBreak < count) {
             double left = totalUnits(widths, 0, commaBreak);
             double right = totalUnits(widths, commaBreak, count);
-            if (left <= limit + 0.05 && right <= limit + 0.05) {
+            if (left <= effectiveLimit + 0.05 && right <= effectiveLimit + 0.05) {
                 emitLines(display, map, clusters, starts, new int[]{commaBreak, count});
                 return;
             }
         }
-        double firstLimit = limit;
-        int base = greedyLineCount(widths, limit);
+        double firstLimit = effectiveLimit;
+        int base = greedyLineCount(widths, effectiveLimit);
         int maxLines = paragraph.length() <= 40 ? base + 1 : base;
         int[] breaks = null;
         double bestCost = Double.MAX_VALUE;
         for (int lines = base; lines <= maxLines; lines++) {
             double[] picked = new double[1];
-            int[] candidate = dpBreaks(widths, clauseEnd, limit, firstLimit, lines, picked);
+            int[] candidate = dpBreaks(widths, clauseEnd, effectiveLimit, firstLimit, lines, picked);
             if (candidate == null) {
                 continue;
             }
@@ -1513,7 +1537,7 @@ public class MainActivity extends Activity {
             }
         }
         if (breaks == null) {
-            breaks = packWidths(widths, limit);
+            breaks = packWidths(widths, effectiveLimit);
         }
         emitLines(display, map, clusters, starts, breaks);
     }

@@ -40,12 +40,21 @@ public class ListActivity extends Activity {
             preferences = getSharedPreferences("clock", MODE_PRIVATE);
             applyTheme();
             getWindow().setStatusBarColor(BACKGROUND_COLOR);
+            // 浅色底下用深色图标，否则白图标贴在米白底上看不见
+            if (!isDark()) {
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+            }
             String requestedType = getIntent().getStringExtra("type");
             type = "blocked".equals(requestedType) ? "blocked" : "liked";
             buildUi();
         } catch (Throwable ignored) {
             showFallback();
         }
+    }
+
+    private boolean isDark() {
+        return preferences == null || preferences.getBoolean("dark", true);
     }
 
     private void applyTheme() {
@@ -175,9 +184,10 @@ public class ListActivity extends Activity {
         return view;
     }
 
+    /** 读取名单；出错时返回 null（区别于「确实是空名单」），由调用方提示 */
     private List<String> loadItems() {
-        List<String> items = new ArrayList<>();
         try {
+            List<String> items = new ArrayList<>();
             Set<String> saved = preferences.getStringSet(type,
                     Collections.<String>emptySet());
             if (saved != null) {
@@ -188,15 +198,23 @@ public class ListActivity extends Activity {
                 }
             }
             Collections.sort(items);
-        } catch (Throwable ignored) {
-            items.clear();
+            return items;
+        } catch (Throwable throwable) {
+            return null;
         }
-        return items;
     }
 
     private void refresh() {
         try {
             List<String> items = loadItems();
+            if (items == null) {
+                // 读不出来 ≠ 空名单，别让用户以为数据没了
+                countView.setText("");
+                listLayout.removeAllViews();
+                emptyView.setText("名单读取失败，请稍后重试");
+                emptyView.setVisibility(View.VISIBLE);
+                return;
+            }
             countView.setText(items.size() + " 句");
             listLayout.removeAllViews();
             emptyView.setText("blocked".equals(type)
