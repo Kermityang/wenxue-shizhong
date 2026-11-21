@@ -5,11 +5,8 @@ import json, glob, os, sys
 APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 chars = set()
 
-corpus = os.environ.get('CLOCK_CORPUS') or os.path.join(APP, 'assets', 'clock.json')
-data = json.load(open(corpus, encoding='utf-8'))
-if isinstance(data, dict):
-    data = data.get('entries') or []
-for e in data:
+corpus = os.path.join(APP, 'assets', 'clock.json')
+for e in json.load(open(corpus, encoding='utf-8')):
     for k in ('s', 'b', 'h'):
         chars |= set(e.get(k) or '')
 

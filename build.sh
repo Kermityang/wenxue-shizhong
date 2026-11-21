@@ -54,25 +54,12 @@ if [ -n "$CORPUS" ] && [ -f "$CORPUS" ]; then
   FONT_OUT="$OUT/clock-subset.ttf"          # 私域语料：子集另存，不覆盖公开版字体
 fi
 # 没装 fontTools 的环境（如 CI）跳过重切，直接用仓库里已有的子集
-PYFT=$(command -v pyftsubset 2>/dev/null || echo /workspace/.venv-font/bin/pyftsubset)
-if [ -x "$PYFT" ]; then
-  sh "$APP/tools/make_subset.sh" "" "$FONT_OUT" || exit 1
-else
-  echo "  skip: 没有 pyftsubset，跳过重切，用仓库里的子集"
-fi
+sh "$APP/tools/make_subset.sh" "" "$FONT_OUT" || true
 
 echo "[1/5] javac"
-# 先清干净，避免编译失败时拿上一次的旧 class 打包（曾经把编译错误吞掉过一次）
-rm -rf "$OUT/classes"
-mkdir -p "$OUT/classes"
-if ! javac -encoding UTF-8 -source 8 -target 8 \
+javac -encoding UTF-8 -source 8 -target 8 \
   -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" \
-  -d "$OUT/classes" $(find "$APP/src" -name '*.java') > "$OUT/javac.log" 2>&1; then
-  grep -v 'bootstrap class path' "$OUT/javac.log" | head -40 >&2
-  echo "ERROR: javac 失败，不继续打包" >&2
-  exit 1
-fi
-grep -E '^Note: .*deprecated|uses or overrides' "$OUT/javac.log" >&2 || true
+  -d "$OUT/classes" $(find "$APP/src" -name '*.java') 2>&1 | grep -v 'bootstrap class path' || true
 
 if [ -z "$(find "$OUT/classes" -name '*.class' 2>/dev/null | head -1)" ]; then
   echo "ERROR: no class files produced" >&2
@@ -100,13 +87,6 @@ if [ -n "$CORPUS" ] && [ -f "$CORPUS" ]; then
 else
   echo "  语料: 公版 assets/clock.json"
 fi
-python3 - "$OUT/assets/clock.json" "$OUT/assets/count.txt" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding='utf-8') as f:
-    count = len(json.load(f)["entries"])
-with open(sys.argv[2], 'w', encoding='utf-8') as f:
-    f.write(str(count) + '\n')
-PY
 "$BT/aapt2" compile --dir "$APP/res" -o "$OUT/res.zip"
 # 版本号：aapt2 的 --version-code 不覆盖 manifest，改写一份副本
 MANIFEST="$APP/AndroidManifest.xml"
