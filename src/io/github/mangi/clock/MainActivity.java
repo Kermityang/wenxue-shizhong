@@ -1,6 +1,7 @@
 package io.github.mangi.clock;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -54,12 +55,21 @@ public class MainActivity extends Activity {
         final String s;
         final String h;
         final String b;
+        /** 1=精准句，2=写意句；旧语料没有这个字段时为 0，按有无 h 推断 */
+        final int tier;
+        /** minute / hour / period / segment / wide；旧语料为空 */
+        final String scope;
+        /** 可出现的整点集合；旧语料为 null */
+        final int[] seg;
 
-        Entry(String time, String s, String h, String b) {
+        Entry(String time, String s, String h, String b, int tier, String scope, int[] seg) {
             this.time = time;
             this.s = s;
             this.h = h;
             this.b = b;
+            this.tier = tier;
+            this.scope = scope;
+            this.seg = seg;
         }
     }
 
@@ -108,6 +118,10 @@ public class MainActivity extends Activity {
     private Handler handler;
     private SharedPreferences preferences;
     private Palette palette = BLACK;
+    private Typeface quoteTypeface;
+    private String appliedFontId = null;
+    /** 用户语料文件的最后修改时间，用来判断要不要重载 */
+    private long corpusStamp = -1L;
     private FrameLayout rootView;
     private LinearLayout quoteLayout;
     private TextView timeView;
@@ -115,6 +129,9 @@ public class MainActivity extends Activity {
     private TextView quoteView;
     private TextView bookView;
     private HashMap<String, List<Entry>> byTime;
+    private HashMap<Integer, List<Entry>> byHour = new HashMap<>();
+    private final java.util.Random random = new java.util.Random();
+    private int level = 3;
     private List<Entry> entries;
     private Entry shown;
     private float typeBase;
@@ -193,6 +210,9 @@ public class MainActivity extends Activity {
 
             int screenWidth = getResources().getDisplayMetrics().widthPixels;
             int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            // onLayoutChange 里那道「实测高度超了就缩字号」的兜底要用它；以前从没赋值，
+            // 那里拿到 0 直接 return，等于这道保险一直没生效
+            screenHeightPx = screenHeight;
             landscape = screenWidth > screenHeight;
             int shortSide = Math.min(screenWidth, screenHeight);
             this.shortSide = shortSide;
@@ -200,19 +220,11 @@ public class MainActivity extends Activity {
             // 字号跟着屏幕短边走；横屏行更短、更该放大，竖屏也略放大一点
             typeBase = shortSide * (landscape ? 1.16f : 1.08f);
             sourceBase = shortSide * (landscape ? 0.041f : 0.034f);
-            Typeface wenKai = loadWenKai();
+            quoteTypeface = loadWenKai();
+            appliedFontId = preferences.getString("font_id", "builtin");
             entries = loadEntries();
-            byTime = new HashMap<>();
-            if (entries != null) {
-                for (Entry entry : entries) {
-                    List<Entry> bucket = byTime.get(entry.time);
-                    if (bucket == null) {
-                        bucket = new ArrayList<>();
-                        byTime.put(entry.time, bucket);
-                    }
-                    bucket.add(entry);
-                }
-            }
+            corpusStamp = corpusFile().lastModified();
+            rebuildIndex();
 
             rootView = new FrameLayout(this);
             rootView.setBackgroundColor(palette.background);
@@ -276,7 +288,7 @@ public class MainActivity extends Activity {
             });
 
             quoteView = new TextView(this);
-            quoteView.setTypeface(wenKai);
+            quoteView.setTypeface(quoteTypeface);
             quoteView.setTextSize(TypedValue.COMPLEX_UNIT_PX, typeBase * 0.060f);
             quoteView.setTextColor(palette.quote);
             quoteView.setLineSpacing(0f, 1.9f);
@@ -323,19 +335,26 @@ public class MainActivity extends Activity {
                 }
             });
 
+            Typeface clockSans = loadClockSans();
             timeView = new TextView(this);
-            timeView.setTypeface(wenKai);
+            timeView.setTypeface(clockSans);
+            timeView.setIncludeFontPadding(false);
             timeView.setTextSize(TypedValue.COMPLEX_UNIT_PX, shortSide * 0.074f);
             timeView.setTextColor(palette.clock);
             clockLayout.addView(timeView);
 
             dateView = new TextView(this);
-            dateView.setTypeface(wenKai);
+            dateView.setTypeface(clockSans);
+            dateView.setIncludeFontPadding(false);
+            // 纵向 LinearLayout 默认把子 View 拉成 MATCH_PARENT，文字默认贴左，
+            // 「11月20日 周五」的右缘就比「13:33」短一截；右对齐回到同一条线上
+            dateView.setGravity(Gravity.END);
             dateView.setTextSize(TypedValue.COMPLEX_UNIT_PX, shortSide * 0.0292f);
             dateView.setTextColor(palette.date);
             clockLayout.addView(dateView);
 
-            // 点一下 = 退出时钟；上滑 = 进设置
+            // 点一下 = 退出时钟；朝任意方向滑 = 进设置（纵向 >120px 或横向 >160px）。
+            // 早先只认上滑，后来放宽成任意方向——Kris 2026-11-21 确认这就是想要的行为
             final GestureDetector detector = new GestureDetector(this,
                     new GestureDetector.SimpleOnGestureListener() {
                         @Override
@@ -356,6 +375,11 @@ public class MainActivity extends Activity {
                                 return true;
                             }
                             return false;
+                        }
+
+                        @Override
+                        public void onLongPress(MotionEvent event) {
+                            showSentenceDialog();
                         }
 
                         @Override
@@ -394,6 +418,49 @@ public class MainActivity extends Activity {
             return INK;
         }
         return BLACK;
+    }
+
+    /** 当前这句的操作面板：喜欢 / 屏蔽。 */
+    private void showSentenceDialog() {
+        if (shown == null) {
+            return;
+        }
+        final String sentence = shown.s;
+        java.util.Set<String> blocked = preferences.getStringSet(
+                "blocked", java.util.Collections.<String>emptySet());
+        java.util.Set<String> liked = preferences.getStringSet(
+                "liked", java.util.Collections.<String>emptySet());
+        boolean isBlocked = blocked.contains(sentence);
+        boolean isLiked = liked.contains(sentence);
+        String message = shown.s + "\n\n" + formatSource(shown.b);
+        new AlertDialog.Builder(this)
+                .setTitle("这句")
+                .setMessage(message)
+                .setPositiveButton(isLiked ? "取消喜欢" : "喜欢这句",
+                        new android.content.DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(android.content.DialogInterface dialog, int which) {
+                                toggleSet("liked", sentence);
+                            }
+                        })
+                .setNeutralButton(isBlocked ? "恢复显示" : "屏蔽这句",
+                        new android.content.DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(android.content.DialogInterface dialog, int which) {
+                                toggleSet("blocked", sentence);
+                            }
+                        })
+                .setNegativeButton("关闭", null)
+                .show();
+    }
+
+    private void toggleSet(String key, String sentence) {
+        java.util.HashSet<String> set = new java.util.HashSet<>(
+                preferences.getStringSet(key, java.util.Collections.<String>emptySet()));
+        if (!set.remove(sentence)) {
+            set.add(sentence);
+        }
+        preferences.edit().putStringSet(key, set).apply();
     }
 
     private void openSettings() {
@@ -442,12 +509,106 @@ public class MainActivity extends Activity {
                 .start();
     }
 
+    private Typeface loadClockSans() {
+        try {
+            return Typeface.createFromAsset(getAssets(), "clock-sans.ttf");
+        } catch (Throwable throwable) {
+            return Typeface.create("sans-serif-medium", Typeface.NORMAL);
+        }
+    }
+
+    /** 设置页选了什么字体就用什么字体：先找下载到 files/fonts 的，再退回内置文楷 */
     private Typeface loadWenKai() {
+        try {
+            String id = preferences.getString("font_id", "builtin");
+            if (id != null && !"builtin".equals(id)) {
+                java.io.File file = new java.io.File(getFilesDir(), "fonts/" + id + ".ttf");
+                if (file.exists()) {
+                    return Typeface.createFromFile(file);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
         try {
             return Typeface.createFromAsset(getAssets(), "LXGWWenKai-Light.ttf");
         } catch (Throwable ignored) {
             return Typeface.SERIF;
         }
+    }
+
+    /** 从设置页回来时字体可能已经换了，立刻换过来 */
+    private void refreshQuoteTypeface() {
+        String id = preferences.getString("font_id", "builtin");
+        if (id == null) {
+            id = "builtin";
+        }
+        if (id.equals(appliedFontId)) {
+            return;
+        }
+        appliedFontId = id;
+        quoteTypeface = loadWenKai();
+        if (quoteView != null) {
+            quoteView.setTypeface(quoteTypeface);
+            render();
+        }
+    }
+
+    /** 重建 byTime / byHour 索引。语料变了（导入、删除批次）之后要重来一遍 */
+    private void rebuildIndex() {
+        byTime = new HashMap<>();
+        byHour = new HashMap<>();
+        if (entries == null) {
+            return;
+        }
+        for (Entry entry : entries) {
+            String time = entry.time == null ? "" : entry.time;
+            List<Entry> bucket = byTime.get(time);
+            if (bucket == null) {
+                bucket = new ArrayList<>();
+                byTime.put(time, bucket);
+            }
+            bucket.add(entry);
+        }
+        for (Entry entry : entries) {
+            if (entry.seg == null) {
+                continue;
+            }
+            String sc = entry.scope == null ? "" : entry.scope;
+            if (!"period".equals(sc) && !"segment".equals(sc) && !"wide".equals(sc)) {
+                continue;
+            }
+            for (int hh : entry.seg) {
+                if (hh < 0 || hh > 23) {
+                    continue;
+                }
+                List<Entry> bucket = byHour.get(hh);
+                if (bucket == null) {
+                    bucket = new ArrayList<>();
+                    byHour.put(hh, bucket);
+                }
+                bucket.add(entry);
+            }
+        }
+    }
+
+    private java.io.File corpusFile() {
+        return new java.io.File(getFilesDir(), CorpusStore.FILE_NAME);
+    }
+
+    /** 用户语料被导入/删除后，文件时间会变；变了就重新读一遍并重建索引 */
+    private boolean reloadIfCorpusChanged() {
+        long stamp = corpusFile().lastModified();
+        if (stamp == corpusStamp) {
+            return false;
+        }
+        corpusStamp = stamp;
+        List<Entry> reloaded = loadEntries();
+        if (reloaded != null && !reloaded.isEmpty()) {
+            entries = reloaded;
+            rebuildIndex();
+            return true;
+        }
+        return false;
     }
 
     private List<Entry> loadEntries() {
@@ -458,17 +619,201 @@ public class MainActivity extends Activity {
             while ((count = input.read(buffer)) != -1) {
                 output.write(buffer, 0, count);
             }
-            JSONArray array = new JSONArray(new String(output.toByteArray(), "UTF-8"));
+            String text = new String(output.toByteArray(), "UTF-8");
+            JSONArray array;
+            if (text.trim().startsWith("{")) {
+                array = new JSONObject(text).optJSONArray("entries");
+            } else {
+                array = new JSONArray(text);
+            }
+            if (array == null) {
+                return null;
+            }
             List<Entry> loaded = new ArrayList<>();
             for (int i = 0; i < array.length(); i++) {
                 JSONObject object = array.getJSONObject(i);
+                JSONArray segArray = object.optJSONArray("seg");
+                int[] seg = null;
+                if (segArray != null) {
+                    seg = new int[segArray.length()];
+                    for (int k = 0; k < segArray.length(); k++) {
+                        seg[k] = segArray.optInt(k, -1);
+                    }
+                }
                 loaded.add(new Entry(object.getString("time"), object.getString("s"),
-                        object.optString("h", ""), object.getString("b")));
+                        object.optString("h", ""), object.getString("b"),
+                        object.optInt("tier", 0), object.optString("scope", ""), seg));
+            }
+            // 并入用户自己导入的句子：同样的 Entry 结构，一起进 byTime / byHour
+            try {
+                CorpusStore store = new CorpusStore(getFilesDir());
+                for (CorpusStore.Batch batch : store.load()) {
+                    for (CorpusStore.Entry item : batch.entries) {
+                        if (item == null || item.s == null || item.s.length() == 0) {
+                            continue;
+                        }
+                        loaded.add(new Entry(
+                                item.time == null ? "" : item.time,
+                                item.s,
+                                item.h == null ? "" : item.h,
+                                item.b == null ? "" : item.b,
+                                item.tier,
+                                item.scope == null ? "" : item.scope,
+                                item.seg));
+                    }
+                }
+            } catch (Throwable ignored) {
             }
             return loaded;
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    /** 档位权重：1 精准 100%，2 75%，3 50%，4 25%，5 写意 0%。 */
+    private boolean wantPrecise() {
+        int[] pct = {100, 75, 50, 25, 0};
+        int idx = Math.max(1, Math.min(5, level)) - 1;
+        return random.nextInt(100) < pct[idx];
+    }
+
+    /** 精准池：minute → hour（仅整点）→ period → segment → wide。 */
+    private List<Entry> poolPrecise(String key, int hour) {
+        List<Entry> out = new ArrayList<>();
+        List<Entry> exact = byTime.get(key);
+        if (exact != null) {
+            for (Entry e : exact) {
+                if (e.tier == 1 && "minute".equals(e.scope)) {
+                    out.add(e);
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;
+            }
+            if (key.endsWith(":00")) {
+                for (Entry e : exact) {
+                    if (e.tier == 1 && "hour".equals(e.scope)) {
+                        out.add(e);
+                    }
+                }
+                if (!out.isEmpty()) {
+                    return out;
+                }
+            }
+        }
+        List<Entry> sameHour = byHour.get(hour);
+        if (sameHour != null) {
+            for (Entry e : sameHour) {
+                if (e.tier == 1 && "period".equals(e.scope)) {
+                    out.add(e);
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;
+            }
+            for (Entry e : sameHour) {
+                if (e.tier == 1 && "segment".equals(e.scope)) {
+                    out.add(e);
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;
+            }
+            for (Entry e : sameHour) {
+                if (e.tier == 1 && "wide".equals(e.scope)) {
+                    out.add(e);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 写意池：segment → wide → period → 本分钟 minute。 */
+    private List<Entry> poolImagery(String key, int hour) {
+        List<Entry> out = new ArrayList<>();
+        List<Entry> sameHour = byHour.get(hour);
+        if (sameHour != null) {
+            for (Entry e : sameHour) {
+                if (e.tier == 2 && "segment".equals(e.scope)) {
+                    out.add(e);
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;
+            }
+            for (Entry e : sameHour) {
+                if (e.tier == 2 && "wide".equals(e.scope)) {
+                    out.add(e);
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;
+            }
+            for (Entry e : sameHour) {
+                if (e.tier == 2 && "period".equals(e.scope)) {
+                    out.add(e);
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;
+            }
+        }
+        List<Entry> exact = byTime.get(key);
+        if (exact != null) {
+            for (Entry e : exact) {
+                if (e.tier == 2) {
+                    out.add(e);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 当天没用过优先；都用过就按日期轮转。 */
+    private Entry chooseEntry(List<Entry> pool, Calendar calendar) {
+        if (pool == null || pool.isEmpty()) {
+            return null;
+        }
+        java.util.Set<String> blocked = preferences.getStringSet(
+                "blocked", java.util.Collections.<String>emptySet());
+        java.util.Set<String> liked = preferences.getStringSet(
+                "liked", java.util.Collections.<String>emptySet());
+        List<Entry> allowed = new ArrayList<>();
+        for (Entry e : pool) {
+            if (blocked.contains(e.s)) {
+                continue;
+            }
+            // 喜欢的句子复制三份，抽中概率变三倍
+            int copies = liked.contains(e.s) ? 3 : 1;
+            for (int k = 0; k < copies; k++) {
+                allowed.add(e);
+            }
+        }
+        if (allowed.isEmpty()) {
+            return null;
+        }
+        long nowMillis = System.currentTimeMillis();
+        String lastLiked = preferences.getString("last_liked_s", "");
+        long lastLikedAt = 0L;
+        try {
+            lastLikedAt = preferences.getLong("last_liked_min", 0L);
+        } catch (ClassCastException ignored) {
+        }
+        List<Entry> fresh = new ArrayList<>();
+        for (Entry e : allowed) {
+            boolean isLiked = liked.contains(e.s);
+            // 喜欢句豁免当天去重，但同一句至少隔 30 分钟
+            if (!isLiked && usedToday.contains(e.s)) {
+                continue;
+            }
+            if (isLiked && e.s.equals(lastLiked) && nowMillis - lastLikedAt < 1800000L) {
+                continue;
+            }
+            fresh.add(e);
+        }
+        List<Entry> src = fresh.isEmpty() ? allowed : fresh;
+        int start = calendar.get(Calendar.DAY_OF_MONTH) % src.size();
+        return src.get(start);
     }
 
     private Entry pickEntry(Calendar calendar) {
@@ -478,47 +823,44 @@ public class MainActivity extends Activity {
         int hour = calendar.get(Calendar.HOUR_OF_DAY);
         int minute = calendar.get(Calendar.MINUTE);
         String key = String.format(Locale.US, "%02d:%02d", hour, minute);
+        String cacheKey = calendar.get(Calendar.DAY_OF_MONTH) + ":" + key;
         loadUsed(calendar);
-        // 同一分钟内重新渲染（旋转、换配色、回前台、进程重建）都复用同一句，绝不换句
+        level = preferences.getInt("level", 3);
+        int savedLevel = preferences.getInt("pick_level", -1);
+        // 同一天、同一分钟、同一档位内重新渲染都复用同一句
         String savedMinute = preferences.getString("pick_minute", "");
-        if (key.equals(savedMinute)) {
+        if (cacheKey.equals(savedMinute) && savedLevel == level) {
             String savedText = preferences.getString("pick_sentence", "");
-            List<Entry> bucket = byTime.get(key);
-            if (bucket != null) {
-                for (Entry entry : bucket) {
-                    if (entry.s.equals(savedText)) {
-                        return entry;
-                    }
+            java.util.Set<String> blocked = preferences.getStringSet(
+                    "blocked", java.util.Collections.<String>emptySet());
+            for (Entry e : entries) {
+                if (e.s.equals(savedText) && !blocked.contains(e.s)) {
+                    return e;
                 }
             }
         }
-        Entry chosen = null;
-        List<Entry> exact = byTime.get(key);
-        if (exact != null && !exact.isEmpty()) {
-            int size = exact.size();
-            int start = calendar.get(Calendar.DAY_OF_MONTH) % size;
-            for (int k = 0; k < size; k++) {
-                Entry candidate = exact.get((start + k) % size);
-                if (!usedToday.contains(candidate.s)) {
-                    chosen = candidate;
-                    break;
-                }
-            }
-            if (chosen == null) {
-                // 候选今天都用过了：宁可重复本分钟的这一句，也绝不跨分钟借——
-                // 每句都自带时间词，借来的句子会和屏幕上的时间对不上
-                chosen = exact.get(start);
-            }
-        } else {
-            // 这一分钟没有语料（正常不会发生）：只取时间最近的句子
+        boolean precise = wantPrecise();
+        List<Entry> pool = precise ? poolPrecise(key, hour) : poolImagery(key, hour);
+        if (pool.isEmpty()) {
+            pool = precise ? poolImagery(key, hour) : poolPrecise(key, hour);
+        }
+        Entry chosen = chooseEntry(pool, calendar);
+        if (chosen == null) {
             chosen = nearestAny(hour * 60 + minute);
         }
         if (chosen != null) {
-            preferences.edit().putString("pick_minute", key)
-                    .putString("pick_sentence", chosen.s).apply();
+            preferences.edit().putString("pick_minute", cacheKey)
+                    .putString("pick_sentence", chosen.s)
+                    .putInt("pick_level", level).apply();
             if (usedToday.add(chosen.s)) {
                 java.util.HashSet<String> copy = new java.util.HashSet<>(usedToday);
                 preferences.edit().putStringSet("used_today", copy).apply();
+            }
+            java.util.Set<String> likedNow = preferences.getStringSet(
+                    "liked", java.util.Collections.<String>emptySet());
+            if (likedNow.contains(chosen.s)) {
+                preferences.edit().putString("last_liked_s", chosen.s)
+                        .putLong("last_liked_min", System.currentTimeMillis()).apply();
             }
         }
         return chosen;
@@ -544,7 +886,12 @@ public class MainActivity extends Activity {
     private Entry nearestAny(int nowMin) {
         Entry best = null;
         int bestDist = Integer.MAX_VALUE;
+        java.util.Set<String> blocked = preferences.getStringSet(
+                "blocked", java.util.Collections.<String>emptySet());
         for (Entry entry : entries) {
+            if (blocked.contains(entry.s)) {
+                continue;
+            }
             int dist = minuteDistance(entry, nowMin);
             if (dist < bestDist) {
                 bestDist = dist;
@@ -633,11 +980,18 @@ public class MainActivity extends Activity {
         shrinkSteps = 0;
         // 块太高就逐档缩字号，保证整块落在「时钟上方」那块地里
         float room = quoteRoomHeight();
-        indentMode = bookMode;
+        // 短句不缩进：首行缩进两格会把 10 个字的句子挤成 8+2，
+        // 单句引文本也没有「段落」要区分，缩进只会让两行左端错开一大截
+        indentMode = bookMode && textLen > 20;
         Laid laid = layoutQuote(quoteText, quoteSize, bookMode, indentMode);
         if (laid.lines <= 1) {
             // 只有一行时行距 1.75 会在句子下方留出大半行空白，出处被顶得很远；压到 1.15
             mult = 1.15f;
+            quoteLineMult = mult;
+            quoteView.setLineSpacing(0f, mult);
+        } else if (laid.lines == 2 && textLen <= 20) {
+            // 短句折成两行（字号大、字少）：1.75 会让两行之间空出一大块，收紧到 1.45
+            mult = 1.45f;
             quoteLineMult = mult;
             quoteView.setLineSpacing(0f, mult);
         }
@@ -1103,17 +1457,20 @@ public class MainActivity extends Activity {
             clauseEnd[i] = CLOSE_PUNCT.indexOf(cluster.charAt(cluster.length() - 1)) >= 0;
         }
         double limit = avail / size;
-        if (book) {
-            // 书页：满行装字，行末若是收尾标点就让它悬挂到版心外（中文书籍的常规做法），
-            // 这样字符的右端能对齐，只有标点伸出去一点，肉眼反而整齐
-            double hang = 1.0;   // 一个字的悬挂余量
-            double firstLimit = indent ? quoteFirstLineWidth() / size : limit;
-            int[] lines = packBookHang(widths, starts, clusters, limit, firstLimit, 1.0);
-            emitLines(display, map, clusters, starts, lines);
+        // 非书页模式：行尾若是标点，applyLaid 会给整行加 0.9em 的 LeadingMarginSpan，
+        // 但 avail 里没扣这块，会让 TextView 自己再折一次。这里先把预算扣掉。
+        double effectiveLimit = limit;
+        if (!book) {
+            effectiveLimit = Math.max(1.0, limit - 0.95);   // 0.9em 缩进 + 浮点余量
+        }
+        // 整句一行放得下就别折 —— 短句拆成两行再漂亮也不如一行。首行宽度要按
+        // 是否缩进取，缩进的段落首行更窄，不能拿整行宽度当准
+        double firstAvail = book ? (indent ? quoteFirstLineWidth() / size : limit) : effectiveLimit;
+        if (totalUnits(widths, 0, count) <= firstAvail - 0.05) {
+            emitLines(display, map, clusters, starts, new int[]{count});
             return;
         }
-        // 一句话里有且只有一个逗号（「是二更鼓了，冬冬二鼓。」这类）：两句各占一行，
-        // 不要按宽度从中间劈开，否则会出现「冬冬二 / 鼓。」这种断法
+        // 一句话里有几个逗号（「收拾端正，已是下午。」这类短句要按句读断）
         int commas = 0;
         int commaBreak = -1;
         for (int i = 0; i < count; i++) {
@@ -1122,22 +1479,54 @@ public class MainActivity extends Activity {
                 commaBreak = i + 1;
             }
         }
-        if (commas == 1 && commaBreak > 0 && commaBreak < count) {
-            double left = totalUnits(widths, 0, commaBreak);
-            double right = totalUnits(widths, commaBreak, count);
-            if (left <= limit + 0.05 && right <= limit + 0.05) {
+        // 短句：先按句读断。书页模式满行装字会把 11 个字切成「收拾端正，已是下 / 午。」，
+        // 末行只剩一两个字，比右端不齐难看得多（这是小说的常规处境，必须挡在前面）
+        if (count <= 20 && commas == 1 && commaBreak > 0 && commaBreak < count) {
+            double firstLimit = firstAvail;
+            double leftUnits = totalUnits(widths, 0, commaBreak);
+            double rightUnits = totalUnits(widths, commaBreak, count);
+            if (leftUnits <= firstLimit + 0.05
+                    && rightUnits <= (book ? limit : effectiveLimit) + 0.05) {
                 emitLines(display, map, clusters, starts, new int[]{commaBreak, count});
                 return;
             }
         }
-        double firstLimit = limit;
-        int base = greedyLineCount(widths, limit);
+        if (book) {
+            // 书页：满行装字，行末若是收尾标点就让它悬挂到版心外（中文书籍的常规做法），
+            // 这样字符的右端能对齐，只有标点伸出去一点，肉眼反而整齐
+            double hang = 1.0;   // 一个字的悬挂余量
+            double firstLimit = indent ? quoteFirstLineWidth() / size : limit;
+            int[] lines = packBookHang(widths, starts, clusters, limit, firstLimit, 1.0);
+            // 满行装字塞完，末行只剩一两个字（没有逗号可断的短句会走到这里）：
+            // 放弃右端对齐，换均衡分配，宁可参差也不要孤字
+            if (count <= 20 && lines.length >= 2 && count - lines[lines.length - 2] <= 2) {
+                double[] picked = new double[1];
+                int[] balanced = dpBreaks(widths, clauseEnd, limit, firstLimit,
+                        lines.length, picked);
+                if (balanced != null) {
+                    lines = balanced;
+                }
+            }
+            emitLines(display, map, clusters, starts, lines);
+            return;
+        }
+        // 长句里只有一个逗号（「是二更鼓了，冬冬二鼓。」这类）：两句各占一行
+        if (commas == 1 && commaBreak > 0 && commaBreak < count) {
+            double left = totalUnits(widths, 0, commaBreak);
+            double right = totalUnits(widths, commaBreak, count);
+            if (left <= effectiveLimit + 0.05 && right <= effectiveLimit + 0.05) {
+                emitLines(display, map, clusters, starts, new int[]{commaBreak, count});
+                return;
+            }
+        }
+        double firstLimit = effectiveLimit;
+        int base = greedyLineCount(widths, effectiveLimit);
         int maxLines = paragraph.length() <= 40 ? base + 1 : base;
         int[] breaks = null;
         double bestCost = Double.MAX_VALUE;
         for (int lines = base; lines <= maxLines; lines++) {
             double[] picked = new double[1];
-            int[] candidate = dpBreaks(widths, clauseEnd, limit, firstLimit, lines, picked);
+            int[] candidate = dpBreaks(widths, clauseEnd, effectiveLimit, firstLimit, lines, picked);
             if (candidate == null) {
                 continue;
             }
@@ -1148,7 +1537,7 @@ public class MainActivity extends Activity {
             }
         }
         if (breaks == null) {
-            breaks = packWidths(widths, limit);
+            breaks = packWidths(widths, effectiveLimit);
         }
         emitLines(display, map, clusters, starts, breaks);
     }
@@ -1519,6 +1908,8 @@ public class MainActivity extends Activity {
         if (handler != null) {
             timeoutMinutes = preferences.getInt("timeout", 30);
             applyPalette();
+            refreshQuoteTypeface();
+            reloadIfCorpusChanged();
             handler.removeCallbacks(minuteTick);
             render();
             // 从后台回来时窗口可能还没重新量过，等一帧再排一次，

@@ -3,7 +3,9 @@
 # 用法：sh tools/make_subset.sh [全字体路径]
 set -e
 APP=$(cd "$(dirname "$0")/.." && pwd)
-FULL=${1:-/workspace/fonts/LXGWWenKai-Light.ttf}
+FULL=${1:-}
+[ -n "$FULL" ] || FULL=/workspace/fonts/LXGWWenKai-Light.ttf
+OUT=${2:-$APP/assets/LXGWWenKai-Light.ttf}
 
 if [ ! -f "$FULL" ]; then
   echo "  skip: 找不到全字体 $FULL（保留现有子集）"
@@ -22,9 +24,9 @@ echo "  字集 $(wc -m < "$TMP") 个字"
 
 "$PYFT" "$FULL" \
   --text-file="$TMP" \
-  --output-file="$APP/assets/LXGWWenKai-Light.ttf" \
+  --output-file="$OUT" \
   --layout-features='*' --glyph-names --symbol-cmap --legacy-cmap \
   --notdef-glyph --notdef-outline --recommended-glyphs \
   --name-IDs='*' --name-legacy --name-languages='*' --drop-tables+=DSIG
 rm -f "$TMP"
-echo "  子集 $(du -h "$APP/assets/LXGWWenKai-Light.ttf" | cut -f1)"
+echo "  子集 $(du -h "$OUT" | cut -f1) -> $OUT"
