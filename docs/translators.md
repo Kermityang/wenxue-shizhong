@@ -29,5 +29,5 @@
 
 - 前 15 位译者卒于 1977 年以前，其英译本在中国与美国均已进入公有领域。
 - 末 3 位是《莫泊桑短篇小说选》（Gutenberg 3090）的合译者，生卒年无法确证；该书 47 条译文仍保留，
-  但在 [ATTRIBUTION.md](ATTRIBUTION.md) 与 [TRANSLATION.md](TRANSLATION.md) 中单列说明，需严格合规者可自行剔除。
+  但在 [ATTRIBUTION.md](../ATTRIBUTION.md) 与 [TRANSLATION.md](../TRANSLATION.md) 中单列说明，需严格合规者可自行剔除。
 - McMaster 一条原检索结果为「1888–1946」，但该英译本 1903 年前后出版，与 1888 年生年矛盾，疑为同名人物，**未采信**。
